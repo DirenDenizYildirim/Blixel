@@ -1,0 +1,71 @@
+{
+  "id": "example.dusk-theme",
+  "name": "Dusk",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Example",
+  "description": "A dark theme in evening violets, with a warm accent.",
+  "icon": {
+    "pixels": [
+      "................",
+      "..........s.....",
+      ".....oooo.......",
+      "...oollo.....s..",
+      "..ollmo.........",
+      "..olmo..........",
+      ".olmmo...s......",
+      ".olmmo..........",
+      ".olmmmo.........",
+      ".olmmmmo......s.",
+      "..olmmmmoo....o.",
+      "..odmmmmmmooooo.",
+      "...oddmmmmmddo..",
+      "....ooddddddo...",
+      "......oooooo....",
+      "................"
+    ],
+    "colors": {
+      "o": "#1e1830",
+      "m": "#f1c96b",
+      "l": "#fbe3a3",
+      "d": "#c79a40",
+      "s": "#e9e4ff"
+    }
+  },
+  "contributes": {
+    "themes": [
+      {
+        "id": "dusk",
+        "label": "Dusk",
+        "light": false,
+        "tokens": {
+          "bg": "#211f2e",
+          "side": "#171522",
+          "card": "#1b1927",
+          "code": "#1e1c2b",
+          "sel": "#2c2940",
+          "line": "#36324d",
+          "border": "#4d4770",
+          "fg": "#ddd8f0",
+          "strong": "#f5f2ff",
+          "muted": "#a29cbf",
+          "com": "#8d87ad",
+          "accent": "#f2a65e",
+          "accentInk": "#1a1622",
+          "dangerBg": "#34202c",
+          "dangerLine": "#7d4560",
+          "dangerFg": "#f39bb4",
+          "kw": "#c7a4f2",
+          "str": "#f0c987",
+          "type": "#8ccfd9",
+          "fn": "#8fb3f5",
+          "ok": "#93d6a0",
+          "warn": "#f0c987",
+          "avL": 0.78,
+          "avC": 0.12,
+          "flagInk": "#171522"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "example.docs-only",
+  "name": "Docs only",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Example",
+  "description": "A rule pack for an agent that writes documentation: it may edit only in docs/, and asks before touching docs/legal/.",
+  "contributes": {
+    "rulePacks": [
+      {
+        "id": "docs-only",
+        "label": "Docs only",
+        "description": "Edits only in docs/. Edits in docs/legal/ ask you first.",
+        "instructions": "You work on the documentation in docs/ only. Do not change code or settings; if a code change is needed, describe it in your reply instead. Files in docs/legal/ are reviewed by people: change them only when asked, and keep their wording otherwise.",
+        "editArea": "docs/**",
+        "protect": ["docs/legal/**"]
+      }
+    ]
+  }
+}

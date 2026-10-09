@@ -1,0 +1,476 @@
+BLIXEL: MAKING EXISTING FEATURES SOLID
+
+Requirements for an AI coding agent. This file says how to make Blixel's existing features reliable: three foundations and twenty features. It adds no features; build nothing outside that list unless the user asks. Evidence dates from 6 October 2026.
+
+Reading the evidence:
+- IDs (S1-S7, G1-G9, R1-R67) are findings in "Blixel feature gaps and user requests".
+- "129/15" is upvotes/comments. "n/r" is not readable. "HN" is Hacker News; its figures are thread points/comments, not votes for the quoted remark.
+- [strong] several independent sources or high counts. [thin] one or two sources, or second-hand. [practice] no direct evidence; needed for the feature to function.
+- Tags measure evidence, not priority. A protocol or security requirement from one primary document is [thin] and still binding.
+
+
+CORRECTIONS TO EARLIER ASSUMPTIONS
+
+1. Agent edits do not arrive through the host.
+- The Agent Client Protocol (ACP) version 2 draft removes the file-system methods a host used to see agent writes (per a Zed maintainer; not in the announcement as read). https://github.com/zed-industries/zed/discussions/56048
+- Build: detect edits by watching each agent's working copy, or by diffing against a snapshot taken before each turn.
+
+2. ACP v1 and v2 run side by side.
+- v2 is a draft (20 July 2026) with no stabilisation date; hosts are told to support both. https://agentclientprotocol.com/announcements/acp-v2-draft.md
+- v2 changes: session updates at any time; stable, patched message IDs; structured file changes (add, delete, modify, move, copy); permission requests with required titles and descriptions, decoupled from tool calls.
+
+3. The Model Context Protocol (MCP) is stateless.
+- The 28 July 2026 specification removes sessions and the initialize handshake, and deprecates Roots, Sampling and Logging (minimum twelve months). https://blog.modelcontextprotocol.io/posts/2026-07-28/
+- Build: Blixel's MCP server and connector client target it; no deprecated feature.
+
+4. The Claude Code and Codex adapters lag and have open defects.
+- Both reach ACP only through adapters. https://agentclientprotocol.com/overview/agents
+- claude-agent-acp: 68 open issues, including a permission request sent in bypass mode (#1196), a usage update reporting 200k for a 1M-context session (#1181), and MCP servers needing sign-in skipped (#1183). https://github.com/agentclientprotocol/claude-agent-acp/issues
+- Zed's codex-acp was archived 22 July 2026; its move is pending. https://github.com/zed-industries/codex-acp/issues
+- Build: treat adapter output as fallible (Foundation A).
+
+5. "The same files" and "a working copy per agent" conflict.
+- A working copy per agent isolates files; a shared editor shows agents together. Only Solo shares one checkout, with lease-based locks. https://soloterm.com/agents
+- Build: every buffer states which working copy it shows.
+
+6. An agent's own report is not status.
+- Agents report "fixed" after merely suppressing the error (R7; 6 sources). https://news.ycombinator.com/item?id=47602986
+- Build: status, logs and "done" come from what Blixel observed.
+
+7. Rollback cannot be left to the agent.
+- ACP carries no checkpoint restore; Claude Code's checkpoints skip shell-command changes (R3). https://code.claude.com/docs/en/checkpointing
+
+
+FOUNDATION A. HOSTING AGENTS OVER ACP
+
+What goes wrong elsewhere
+- Adapter defects and the archived Codex adapter: Correction 4.
+- Wrapping the Claude Code terminal program "became unfeasible to maintain" (Omnara; second-hand). https://feedbagel.com/post/omnara-a-mobile-platform-for-managing-and-communicating-with-ai-agents
+- A bundled agent kit crashes on Windows (Nimbalyst #1361, n/r). https://github.com/nimbalyst/nimbalyst/issues
+- Parallel subagents exhaust memory; runs end on transient errors (Claude Code #70523, #70475, n/r). https://claudeissues.com/digest/2026-06-24
+- A host "wouldn't release file descriptors" (Conductor; one HN comment, 279/164). https://news.ycombinator.com/item?id=47866750
+- Host profiles and skills do not apply to external agents; users file requests for native features lost over ACP (R4, R45, R61). https://zed.dev/docs/ai/external-agents
+
+Solid means
+- Blixel negotiates v1 or v2 per agent; every criterion here passes under both. [thin]
+- Each adapter's version is pinned, shown, and never updated silently. [strong]
+- One agent's crash, hang or failed start leaves Blixel and other agents running. [thin]
+- Removing an agent or quitting ends its child processes and file watchers; open file handles return to baseline. [thin]
+- Where an adapter lacks something Blixel relies on, that agent's page says so; no control does nothing. [strong]
+
+Constraints
+- ACP does not standardise subagent activity (R26; discussion #690, 13/4). https://github.com/agentclientprotocol/agent-client-protocol/discussions/690
+
+
+FOUNDATION B. FIRST-RUN SETUP
+
+What goes wrong elsewhere
+- Every agent needs its own install and login; the login is the main friction. https://github.com/pingdotgg/t3code
+- Claude Code open/total issues: Windows and Windows Subsystem for Linux 3,121/19,373; authentication 1,824/11,482; installation 535/4,387 (R52; mirror; problem counts, not votes). https://claudeissues.com/topic
+- Docker, the command line and antivirus flagging unsigned executables block users (R57; Odysseus #636, 10 upvotes). https://github.com/odysseus-dev/odysseus/discussions/636
+
+Solid means
+- With no Node.js and no agent installed, the user installs and starts Claude Code, Codex and OpenCode inside Blixel without a terminal. [strong]
+- Each agent shows "signed in" or "needs sign-in"; sign-in runs the agent's own flow. [strong]
+- API (application programming interface) keys live in the operating system's credential store, never in project files, chat or logs. [thin]
+- A failed setup step names the step and cause, and does not block other agents. [strong]
+- Installers are code-signed on every operating system Blixel ships for. [thin]
+
+Constraints
+- Agent sign-in is unavoidable: billing is between user and provider (R51). https://zed.dev/docs/ai/external-agents
+- Reference pattern: the host downloads the agent and manages Node.js or Python runtimes. https://www.jetbrains.com/help/ai-assistant/acp.html
+
+
+FOUNDATION C. SECURITY
+
+What goes wrong elsewhere
+- A prompt injection made one coding agent rewrite another's configuration to lift its restrictions (research demonstration; second-hand; September 2025, possibly outdated). https://simonwillison.net/2025/Sep/24/cross-agent-privilege-escalation
+- Self-propagating instructions reached about 55% infection through shared files such as AGENTS.md, about 17% by persuasion alone (G8; second-hand). https://codex.danielvaughan.com/2026/08/27/mind-viruses-self-propagating-instructions-multi-agent-llm-codex-cli-security/
+- Users approve 97% of permission prompts, so a prompt alone is no safeguard (second-hand). https://gigazine.net/gsc_news/en/20260810-claude-code-auto-mode/
+- An agent re-enabled tools the user had disabled (R15; Odysseus #5523, #5527). https://github.com/odysseus-dev/odysseus/labels/p1
+- "Claude once bypassed the deny list and nuked an important directory" (HN 189/131). https://news.ycombinator.com/item?id=47218318
+- No public incident in a commercial multi-agent coding workspace was found.
+
+Solid means
+- No tool call, shell command, connector call or agent message can change any agent's permissions, limits or "working with others" settings; only the user can. [strong]
+- An agent's write to any agent's configuration, hook or instruction file (AGENTS.md, CLAUDE.md) is detected, attributed and held for the user's approval before it merges or reaches another agent. [strong]
+- A message or hand-off from an agent never counts as user input, consent, or an answer to a permission request. [strong]
+- A hand-off carries no permissions; the receiver acts under its own settings. [thin]
+- Every command, tool call, connector call, permission decision and agent message is logged per agent. [thin]
+- Secrets never appear in text sent to an agent (R67). [thin]
+
+Constraints
+- Sandboxing is out of scope, so the second criterion is detection, not prevention; worktrees are not a security boundary. https://code.visualstudio.com/docs/copilot/agents/overview
+
+
+FEATURE 1. AGENT SIDEBAR AND STATUS
+
+What goes wrong elsewhere
+- Agents "hang thinking they need human input" (R22; HN 396/224). https://news.ycombinator.com/item?id=46902368
+- Sessions hang silently (R22; Nimbalyst #1345, n/r). https://github.com/nimbalyst/nimbalyst/issues
+- Users could not "see which agents needed my immediate attention" (R21; HN 37/31). https://news.ycombinator.com/item?id=48832797
+- First-party status separates failed from idle (S6). https://code.claude.com/docs/en/agent-view
+
+Solid means
+- Status is computed from observed events (session updates, open requests, process state), never from an agent's message text. [strong]
+- "Waiting on you" shows whenever that agent has an open permission request or question, and clears only when answered. [strong]
+- An agent whose process exited or errored is shown as stopped, never idle or working. [thin]
+- A working agent with no session update, file change or shell output for a set period is flagged as possibly stalled. [strong]
+
+
+FEATURE 2. CHAT PER AGENT
+
+What goes wrong elsewhere
+- Inline diffs "cause tons of noise" (R2; Claude Code #37951, 99 thumbs-up per digest; Zed #58333, 60/15). https://github.com/anthropics/claude-code/issues/37951
+- "It doesn't tell you whether the agent's self-reported outcome matches reality" (R7; HN 77/28). https://news.ycombinator.com/item?id=47602986
+- Hosts do not render agents' structured questions (R56; Zed #48784, 21/1; ACP #371, 9/5). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent&page=2
+- Subagent activity is invisible (R26; Zed #49452, 27/3). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent
+- All sessions disappeared after a restart (R60; Nimbalyst #1347, n/r). https://github.com/nimbalyst/nimbalyst/issues
+
+Solid means
+- Diffs and tool output are collapsed by default. [strong]
+- The log of what the agent read, ran and edited comes from what Blixel observed (commands, exit codes, files changed), beside the agent's claim. [strong]
+- A working-copy change with no reported tool call still appears, marked unreported; this covers shell commands and subagents. [strong]
+- An agent's structured question (ACP elicitation) is rendered and answerable. Necessary, not new: unrendered, the agent blocks. [strong]
+- Updates arriving outside a turn appear in order; an update to an existing message ID patches it. [thin]
+- Shown messages and logs survive a restart. Necessary: their loss is a reported defect. [thin]
+
+Constraints
+- ACP stabilised elicitation on 22 July 2026. https://agentclientprotocol.com/updates
+
+
+FEATURE 3. PERMISSIONS
+
+What goes wrong elsewhere
+- Allow rules are ignored: two open bugs, 27 and 26 comments (R9; Claude Code). https://claudeissues.com/issue/3673-feature-request-persistent-global-permissions
+- Suggested "always allow" patterns are too narrow to stop repeat prompts (R9; Claude Code #83406, n/r). https://claudeissues.com/issue/83406-feature-suggested-always-allow-permission-patterns-are-often-too-narrow-to-preve
+- Requests "are auto-denied without ever being shown to the user" (R21; Nimbalyst #1348, n/r). https://github.com/nimbalyst/nimbalyst/issues
+- No single source of truth for external-agent permissions (R10; Zed #49590, 22/5); the exact command is not shown (R11; Zed #53879, 57/13). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent
+- Changing approval mode needs a restart (R15; Odysseus #6305, n/r). https://github.com/odysseus-dev/odysseus/issues/6305
+
+Solid means
+- Blixel answers every request from its own per-agent settings, whatever mode the agent reports. [strong]
+- Every request under Ask reaches the user, subagent requests included; none is auto-denied or dropped unseen. [thin]
+- "Always allow" sets that tool or connector to Allow for that agent, persists across restarts, and never prompts again; the prompt states this scope. [strong]
+- Off holds through the shell (Foundation C): with push Off, a push typed in the agent's shell fails. Where Blixel cannot enforce this, the setting says so. [thin]
+- A request shows the full command and working directory, plus the v2 title and description where supplied. [thin]
+- A permission change applies to the running agent without restarting Blixel. [thin]
+- A connector set to Off is not passed to that agent's session. [thin]
+
+Constraints
+- Evidence is single-agent; several agents prompting at once is an extrapolation.
+
+
+FEATURE 4. SHARED CODE EDITOR
+
+What goes wrong elsewhere
+- "When agent updates file, it doesn't even register in the 'buffer'" (R43; one HN comment, 279/164). https://news.ycombinator.com/item?id=47866750
+- Agents silently overwrite each other's work on shared state (one user, two HN threads). https://news.ycombinator.com/item?id=46993479
+- Agent tooling does not track changes made by shell commands or most subagents. https://code.claude.com/docs/en/checkpointing
+- No demand was measured for agent cursors, following or slowed typing; slowed typing is untested either way (G3).
+
+Solid means
+- An agent's write appears in an open buffer without reopening the file, however it was made. [thin]
+- Replay is display only: the file on disk holds what the agent wrote, and the buffer equals it when replay ends. [practice]
+- Status, diff, checkpoints and merge read the disk and never wait for replay; typing speed (2 to 40 characters per second, default 12) never slows the agent. [practice]
+- Every buffer states its working copy and branch (R37). [strong]
+- No edit is silently lost: when two parties change the same lines of one copy, both versions are kept and the conflict is shown. [thin]
+- Moves and deletions update tabs and the file list. [thin]
+- Line marks, cursors and the per-file agent list derive from detected changes and match the working-copy diff. [practice]
+
+Constraints
+- Corrections 1 and 5.
+
+
+FEATURE 5. SHELLS
+
+What goes wrong elsewhere
+- Users cannot see the command the agent is running (R11; Zed #53879, 57/13). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent
+- Terminal rendering faults in long sessions (Superset; HN 108/135). https://news.ycombinator.com/item?id=48236770
+- Agent shell tools inherit the server's input and hang for an hour (Odysseus #6520, n/r). https://github.com/pewdiepie-archdaemon/odysseus/issues
+
+Solid means
+- Each agent command appears in its shell with exact text, output and exit code; where output is unavailable, the entry says so. [thin]
+- An agent's command never reads Blixel's own input; one waiting for input is shown as waiting. [thin]
+- After 100,000 lines of output a shell still renders and scrolls correctly. [thin]
+
+
+FEATURE 6. CREATE-AGENT PAGE
+
+What goes wrong elsewhere
+- No per-agent directory, instructions, connectors or model in single-vendor teams (R25; Claude Code #23669, 26 comments; Zed #54499, 17/2). https://claudeissues.com/digest/week/2026-02-02
+- Hosted models shown as "local" (R66; Odysseus #6217). https://github.com/odysseus-dev/odysseus/labels/p1
+- A cost limit for unattended runs: closed "not planned", six similar filings (R19; Claude Code #66048, 2 comments). https://claudeissues.com/issue/66048-feature-request-add-cost-limit-configuration-to-prevent-unattended-runs-from-exc
+- Idle teammates keep consuming tokens (second-hand). https://bestagent.dev/claude-code-agent-teams-worth-it-2026
+- Changing an agent's system prompt is an open ACP request (#414, 6/3). https://github.com/agentclientprotocol/agent-client-protocol/discussions?discussions_q=sort%3Atop
+
+Solid means
+- Each setting applies to that agent only and is what its session runs with. [strong]
+- "Runs on" states hosted, API key or self-hosted; a hosted model is never labelled local. [thin]
+- The page states how instructions reach this agent; if the agent cannot accept them, it says so before creation. [thin]
+- At the daily spending limit the agent starts no new turn and its status says why; the limit covers scheduled runs and tasks handed to it. [thin]
+- An agent set to wait when idle spends no tokens until a user message, permitted hand-off or schedule arrives. [thin]
+
+
+FEATURE 7. AGENTS WORKING TOGETHER
+
+What goes wrong elsewhere
+- Messaging between sessions drew 84 comments and at least seven duplicates; shipped for Claude sessions only (R23). https://claudeissues.com/issue/24798-inter-session-communication-for-multi-claude-workflows
+- Background agents drop queued messages (R29; Claude Code, 14 comments in a week). https://claudeissues.com/digest/week/2026-07-13
+- Agent teams "finish Claude tokens quota in 3 minutes, largely over delegation and result messages" (R30; HN 396/224). https://news.ycombinator.com/item?id=46902368
+- An automatic review gate can loop two vendors' agents and drain usage limits. https://github.com/openai/codex-plugin-cc
+- A cross-vendor hand-off keeps the transcript but loses the reasoning (R31; HN 72/28). https://news.ycombinator.com/item?id=47836740
+
+Solid means
+- The receiver is told each message came from a named agent, not the user. [strong]
+- Blixel fixes sender identity when it passes the server to a session; no agent can send as another. [thin]
+- The "working with others" settings are enforced by the server; a disallowed call fails with a reason. [thin]
+- A message to a busy agent is queued and delivered at its next turn; the sender learns delivered or failed. [thin]
+- Senders are rate-limited, repeats dropped, queues capped; automatic exchanges stop after a set number of turns. [thin]
+- Messages and hand-offs appear in both agents' chats; a hand-off shows the original task and its origin. [thin]
+- At session start Blixel checks the agent sees the server's tools; if not, the feature shows as unavailable. [thin]
+- Message and hand-off tokens count toward the sender's usage and daily limit. [thin]
+
+Constraints
+- Baseline rules: Claude Code's documented ones. https://code.claude.com/docs/en/cross-session-messaging
+- Correction 3: the server has no session to hold identity or queues, and no Sampling.
+
+
+FEATURE 8. AVATARS
+
+What goes wrong elsewhere
+- No complaints found. One HN thread (48/36) praised a character display and asked for "thinking bubbles". https://news.ycombinator.com/item?id=47545642
+
+Solid means
+- Avatar motion follows the same status value as the sidebar. [thin]
+- The same name always generates the same avatar. [practice]
+- State is never shown by motion alone. [practice]
+
+
+FEATURE 9. COLOUR THEMES
+
+What goes wrong elsewhere
+- Request to centralise colour roles and contrast pairing (Odysseus #6125, 1 reaction). https://github.com/pewdiepie-archdaemon/odysseus/labels/enhancement
+
+Solid means
+- Every theme defines the same named colour roles; no component uses a colour outside them. [thin]
+- In every theme text passes an automated contrast check and agent cursor colours stay distinguishable. [thin]
+
+
+FEATURE 10. SOURCE CONTROL
+
+What goes wrong elsewhere
+- "Code needs to be reviewed BEFORE making destructive changes, not after" (R1; Codex #2998, 87 votes, February 2026 snapshot; 100+ comments). https://github.com/openai/codex/issues/2998
+- Accept or reject of agent edits requested four times on Zed (R1; 30/7, 23/0, 23/2, 20/4). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent
+- "Git repository wiped after workspace deletion" (R39; Vibe Kanban #3406, n/r). https://github.com/BloopAI/vibe-kanban/issues
+- Worktree creation writes an absolute path into configuration (R39; Claude Code #88747, 18 comments). https://claudeissues.com/digest/week/2026-08-17
+- No choice of base branch (R35; Claude Code #23622, 22 comments); diff only against main (R5; #23626, 45 comments, since resolved). https://claudeissues.com/digest/week/2026-02-02
+- Users cannot see an agent's worktree and branch (R37; Zed #26084, 143/24, from 2024; OpenCode #13343). https://github.com/anomalyco/opencode/issues/13343
+- Agents in separate worktrees make incompatible changes (R32; HN 279/164). https://news.ycombinator.com/item?id=47866750
+
+Solid means
+- One agent, one branch, one working copy; none shared (S1). [strong]
+- Nothing reaches the user's branch without the user: the diff comes first, and each file is accepted or rejected. [strong]
+- The diff is computed from the working copy, so it includes shell-command and subagent changes. [thin]
+- The diff names its comparison branch: the agent's base branch unless the user picks another. [thin]
+- Deleting a working copy never changes the main repository; Blixel snapshots it first and offers to delete the branch. [strong]
+- Creating a working copy writes no absolute path into repository configuration. [thin]
+- A conflicting merge is never completed or resolved silently; conflicting files are listed. [strong]
+
+
+FEATURE 11. TASK BOARD
+
+What goes wrong elsewhere
+- Teammates "sometimes fail to mark tasks as completed, which blocks dependent tasks" (second-hand relay of Anthropic documentation). https://bestagent.dev/claude-code-agent-teams-worth-it-2026
+- Users keep PLAN.md and PROGRESS.md by hand (R28; HN 396/224). https://news.ycombinator.com/item?id=46902368
+
+Solid means
+- A task becomes done only on evidence Blixel observed or a user action; the agent's "done" is shown as a claim (R7). [strong]
+- One agent claims a task at a time; a second claim is refused (R28). [thin]
+- When an agent stops or is removed, its in-progress tasks are flagged. [thin]
+
+
+FEATURE 12. REVIEW INBOX
+
+What goes wrong elsewhere
+- "I have to constantly switch between terminal tabs to check permission requests" (R21; Claude Code #45609, 4 comments). https://claudeissues.com/issue/45609-feature-football-manager-style-news-inbox-for-multi-agent-claude-code-sessions
+- Filed again with eight related issues (R21; Claude Code #70591, 5 comments); both closed "not planned", reactions n/r. https://claudeissues.com/issue/70591-feature-centralized-permission-approval-notifications-for-multi-agent-workflows
+
+Solid means
+- Every open permission request, agent question, diff awaiting review and stopped agent appears, for every agent of every vendor. [strong]
+- An item can be answered in the inbox without opening the agent's chat. [thin]
+- An item leaves only when resolved, and the count equals the open items. [practice]
+
+
+FEATURE 13. CONNECTORS
+
+What goes wrong elsewhere
+- Recreating a connector "changes its id and silently breaks tool references" (R54; Odysseus #6328, n/r). https://github.com/pewdiepie-archdaemon/odysseus/labels/enhancement
+- Configuration changes need a restart (R53; Claude Code #24057, 35 comments). https://claudeissues.com/digest/week/2026-02-02
+- No visible server status (R53; goose #2563, 4/1). https://github.com/aaif-goose/goose/discussions/categories/ideas?discussions_q=is%3Aopen+sort%3Atop
+- A failed connection pins a processor core (Odysseus #5518). https://github.com/odysseus-dev/odysseus/labels/p1
+- Servers needing sign-in are skipped (R55; claude-agent-acp #1183); per-user sign-in is a 72/36 request from 2025 (Open WebUI). https://github.com/open-webui/open-webui/discussions?discussions_q=is%3Aopen+sort%3Atop
+- Tool definitions change after approval (second-hand compilation). https://mcp.directory/blog/mcp-security-200000-exposed-servers-owasp-mcp-top-10-cves
+
+Solid means
+- Editing a connector keeps its identity; per-agent settings survive. [thin]
+- A configuration change applies without restarting Blixel. [thin]
+- Each connector shows connected, failed or needs sign-in; a failed one stops retrying after a limit. [strong]
+- A connector needing sign-in is never silently skipped. [strong]
+- Tool definitions are hashed at approval; a later change alerts the user and returns the connector to Ask. [thin]
+- Every connector call is logged with agent, tool and arguments. [thin]
+
+Constraints
+- Correction 3 applies to the connector client.
+
+
+FEATURE 14. NOTES AND DOCS
+
+What goes wrong elsewhere
+- Agents cannot reliably query notes and documents although typed tools exist (R64; Odysseus #6183, n/r). https://github.com/odysseus-dev/odysseus/issues/6183
+- Users ask for "memory inspection and editing" (R62; Odysseus #3932, 24 upvotes). https://github.com/odysseus-dev/odysseus/discussions/3932
+- "One benign-looking interaction can plant something that later resurfaces as trusted context" (R62; Odysseus #4776, 4 upvotes, 15 comments). https://github.com/odysseus-dev/odysseus/discussions/4776
+
+Solid means
+- A note the user can see is returned to any agent permitted to read it. [thin]
+- Reading and writing notes are separate permissions. [thin]
+- Every agent write is attributed, visible to the user, editable and revertible. [thin]
+- With write set to Ask, an agent's change reaches no other agent until the user approves it. [thin]
+
+
+FEATURE 15. SEARCH AND COMMAND PALETTE
+
+What goes wrong elsewhere
+- No evidence in the notes on how this feature fails elsewhere; requests exist only for searching conversations (R60). https://github.com/openai/codex/discussions?discussions_q=is%3Aopen+sort%3Atop
+
+Solid means
+- Each result states its type (file, chat, task, agent, command) and opens the exact location. [practice]
+- A file result states which working copy it is in. [practice]
+- A command that destroys work asks for confirmation. [practice]
+
+
+FEATURE 16. GROUP ROOMS
+
+What goes wrong elsewhere
+- Agents sharing a thread converge: "eventually one agent just agrees with whatever was said last" (R33; one commenter, HN 16/14). https://news.ycombinator.com/item?id=47270020
+- A member's reply goes missing from a group chat (LobeHub #19552, n/r). https://github.com/lobehub/lobehub/issues
+
+Solid means
+- Every room message shows its author; agents receive other agents' messages marked as from an agent, never the user. [strong]
+- A user message addressed to an agent always yields a visible reply or a visible failure. [thin]
+- Agent-to-agent turns stop after a set number without the user. [thin]
+- A permission request raised in a room goes to the user; no room message can answer it. [strong]
+
+Constraints
+- Rooms use the Feature 7 server and rules.
+
+
+FEATURE 17. SCHEDULES
+
+What goes wrong elsewhere
+- "Scheduled action tasks bypass the sandbox" (R65; Odysseus #6021, n/r). https://github.com/odysseus-dev/odysseus/labels/enhancement?page=2
+- Repeating reminders fire once unless a browser tab is open; scheduled tasks shift an hour at daylight-saving changes (Odysseus #6490, #6480, n/r). https://github.com/pewdiepie-archdaemon/odysseus/issues
+
+Solid means
+- A scheduled run uses the agent's current permissions and limits, never looser ones. [thin]
+- A run fires at the stated local time across daylight-saving changes. [thin]
+- Every occurrence fires while Blixel runs; occurrences missed while it was closed are reported. [thin]
+- A scheduled run reaching an Ask permission waits for the user; it is neither auto-approved nor auto-denied. [thin]
+
+
+FEATURE 18. HISTORY WITH CHECKPOINTS
+
+What goes wrong elsewhere
+- "How is there not a /rewind or /revert feature?" (R3; Codex, 146/50). https://github.com/openai/codex/discussions?discussions_q=is%3Aopen+sort%3Atop
+- Rewind is lost when Claude Code is hosted over ACP (R3; Zed #50192, 41/9). https://github.com/zed-industries/zed/discussions?discussions_q=is%3Aopen+sort%3Atop+ACP+agent
+- Claude Code checkpoints skip shell-command changes, most subagent edits and other concurrent sessions (R3). https://code.claude.com/docs/en/checkpointing
+- Rewind fails silently (Claude Code #87575, 15 comments). https://claudeissues.com/digest/week/2026-08-17
+- Conductor warns against checkpoints when chats share a workspace (R3). https://www.conductor.build/docs/reference/checkpoints
+
+Solid means
+- Blixel checkpoints an agent's working copy before each of its turns, for every hosted agent. [strong]
+- Rollback restores every file, including shell-command and subagent changes. [strong]
+- Rolling back one agent changes no other agent's working copy and none of the user's edits. [thin]
+- Before rollback Blixel shows what will be discarded and asks; the pre-rollback state is kept as a checkpoint. [thin]
+- Rollback completes or reports failure; it never reports success with files unchanged. [thin]
+- Checkpoints add no commits to branches the user sees. [thin]
+- After rollback the agent is told which checkpoint its files match. [practice]
+
+Constraints
+- State outside the working copy is not restored; say so at rollback (R40; HN 127/94). https://news.ycombinator.com/item?id=47343927
+
+
+FEATURE 19. USAGE AND COST
+
+What goes wrong elsewhere
+- No session tokens and cost over ACP (R18; discussion #175, 6/4). https://github.com/agentclientprotocol/agent-client-protocol/discussions?discussions_q=sort%3Atop
+- No cost history across sessions (R18; Claude Code, 11 comments). https://claudeissues.com/digest/week/2026-07-13
+- Provider-reported cost ignored (R18; OpenCode #43818, 8 thumbs-up per digest). https://github.com/Chestnuts-Sisyphus/gittok/issues/1590
+- A usage update reports 200k for a 1M-context session (claude-agent-acp #1181). https://github.com/agentclientprotocol/claude-agent-acp/issues
+
+Solid means
+- Usage is recorded per agent and per task and kept across sessions and restarts. [strong]
+- Figures are those the agent or provider reports; an estimated, missing or implausible figure is labelled, never shown as zero. [thin]
+- A task's figure includes agents it was handed to. [thin]
+- The daily spending limit uses these same figures. [practice]
+
+Constraints
+- ACP stabilised session usage updates on 5 June 2026; the notes disagree on whether cost is carried. https://agentclientprotocol.com/updates
+
+
+FEATURE 20. BROWSER PANE
+
+What goes wrong elsewhere
+- No evidence in the notes on how this feature fails elsewhere; seven comparable tools are confirmed to ship one. https://code.claude.com/docs/en/desktop
+
+Solid means
+- No agent can drive or read the pane unless the user sends its content to an agent. [practice]
+- A page in the pane cannot call Blixel's internal commands or reach agent sessions. [practice]
+
+
+OUT OF SCOPE FOR NOW
+
+Do not build these unless the user asks. People asked for them; they are outside Blixel's feature list.
+
+- Steering agents from a phone or another machine (R44, R45).
+- Remote hosts over Secure Shell (R46).
+- Device sync; relay encryption; voice input (R47, R48, R49).
+- A running environment per agent: dev server, ports, database (R40).
+- Setup scripts and copying git-ignored files into working copies (R36).
+- A host screen for creating pull requests (S5, S7).
+- Sandboxing agent commands (R12).
+- Several accounts per provider (R50).
+- Pass-through of planning mode, hooks, slash commands and skills; editor diagnostics for agents (R61).
+- Context-window and plan-quota indicators (R16, R17).
+- Operating-system notifications and sounds (R20, S6).
+- Earned or adaptive permissions (G1).
+- Recorded group decisions and councils (G2, R63).
+- Deep research (no ID); email and calendar (R64 in part).
+- Forking a conversation; editing an earlier message (R4).
+- Resuming an agent session after restart; renaming or sharing conversations (R60).
+- An ignore file for sensitive files (R13).
+- Permission rules finer than one tool, such as command wildcards; editing a tool call before approval (R9 in part, R14).
+- One permissions screen for all agents (R10).
+- Risk-ranked inbox; activity graph or timeline (G6, R21 in part).
+- Warnings for design or intent conflicts (G7, R32).
+- A built-in cross-vendor review gate (R8).
+- Session playback (G4); review units with "viewed" marks (R6).
+- Split panes or windows for agent threads (R27).
+- Roles or veto in rooms; side threads (R33, R34).
+- Pulling files from a live working copy; non-git folders and multi-repository sessions; Jujutsu (R38, R41, R42).
+- Showing which instruction file each agent loaded (R59).
+- Exposing the host to agents as an MCP server, beyond messaging and tasks (S4).
+- Non-code work surfaces (G9).
+- Phone notifications, several people per workspace, plugins (no ID).
+
+
+EVIDENCE LIMITS
+
+- Reddit was not read; less technical users are nearly absent.
+- GitHub thumbs-up counts were unreadable on issue trackers (Claude Code, OpenCode, Nimbalyst, Odysseus and others), so [thin] may hide real demand.
+- Codex issue votes are a February 2026 snapshot; "digest" figures come from an automated digest.
+- HN quotes passed through a summarising tool; check before quoting verbatim.
+- "Closed, not planned" on Claude Code is weak evidence: an estimated 49-71% of closures are automated. https://gist.github.com/azkore/934e5387579efb17e1080402efedf13d
+- Research figures come from second-hand write-ups, several on 2025 data.
+- Odysseus, Open WebUI, LobeHub and Jan are general-purpose AI workspaces, not coding tools.
+- Meaning: counts are floors, [strong] can rest on several low-count sources, no tag is a ranking.

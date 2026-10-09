@@ -1,0 +1,50 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "Main screen",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "NewAgent.dc.html": {
+      "expand": "fill",
+      "h": 2094,
+      "is_interactive": true,
+      "title": "New agent",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Themes.dc.html": {
+      "expand": "fill",
+      "h": 5784,
+      "is_interactive": true,
+      "title": "Themes",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-06T15:05:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "file": "NewAgent.dc.html",
+    "view": "focused"
+  },
+  "notes": {},
+  "order": [
+    "Main.dc.html",
+    "Themes.dc.html",
+    "NewAgent.dc.html"
+  ],
+  "pages": [],
+  "title": "Workspace main screen"
+}

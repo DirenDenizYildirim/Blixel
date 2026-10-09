@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New agent</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#282c34}
+a{color:#e06c75}a:hover{color:#f0959c}
+button{font:inherit;cursor:pointer}
+textarea,input,select{font:inherit}
+::placeholder{color:#7fa3ae;opacity:1}
+button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #e06c75;outline-offset:2px}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #282c34; color: #9cdef2; font-family: 'Fira Code', ui-monospace, Menlo, Consolas, monospace; font-size: 14px; line-height: 22px">
+
+<nav aria-label="Workspace" style="flex: 1 1 232px; min-width: 0; display: flex; flex-direction: column; background: #111; border-right: 1px solid #2c3640">
+<div style="display: flex; align-items: center; justify-content: space-between; min-height: 60px; box-sizing: border-box; padding: 0 18px 0 12px">
+<button type="button" aria-label="Collapse sidebar" style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #9cdef2"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<span style="font-size: 16px; font-weight: 600; color: #e06c75">blixel</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 10px">
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.5-4.5"></path></svg><span>Search</span></button>
+<button type="button" aria-current="page" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: #1d2127; border: 0; border-radius: 8px; color: #c4eefb; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" style="flex: none"><path d="M12 5v14M5 12h14"></path></svg><span>New agent</span></button>
+<div style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="9" cy="8" r="3.5"></circle><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"></path><path d="M16 4.6a3.5 3.5 0 010 6.8M18 14.3c2 .8 3.5 2.6 3.5 5.7"></path></svg><span>Agents</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 2px 10px 0">
+<button type="button" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: transparent; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #2e2118"><path fill="#f0a35e" d="M8 4h4v4H8zM16 4h4v4h-4zM4 8h20v4H4zM4 12h4v4H4zM12 12h4v4h-4zM20 12h4v4h-4zM8 16h12v4H8zM4 20h4v4H4zM20 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Kestrel</span><span style="font-size: 12px; color: #7fd99a">working</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #7fd99a"></span></span><span style="font-size: 12px; color: #7fa3ae">Claude Code</span></span>
+</button>
+<button type="button" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: transparent; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #17281d"><path fill="#7fd99a" d="M4 4h4v4H4zM20 4h4v4h-4zM4 8h8v4H4zM16 8h8v4h-8zM8 12h12v4H8zM4 16h8v4H4zM16 16h8v4h-8zM12 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Moth</span><span style="font-size: 12px; color: #e5c07b">queued</span><span style="width: 5px; height: 5px; border-radius: 50%; border: 2px solid #e5c07b"></span></span><span style="font-size: 12px; color: #7fa3ae">Codex</span></span>
+</button>
+<button type="button" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: transparent; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #251d30"><path fill="#c9a0f5" d="M12 4h4v4h-4zM8 8h12v4H8zM4 12h8v4H4zM16 12h8v4h-8zM8 16h12v4H8zM4 20h4v4H4zM12 20h4v4h-4zM20 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Juno</span><span style="font-size: 12px; color: #7fa3ae">idle</span><span style="width: 5px; height: 5px; border-radius: 50%; border: 2px solid #7fa3ae"></span></span><span style="font-size: 12px; color: #7fa3ae">OpenCode, local</span></span>
+</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 0">
+<button type="button" aria-expanded="false" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M3 6.5A1.5 1.5 0 014.5 5H9l2 2.5h8.5A1.5 1.5 0 0121 9v8.5a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"></path></svg><span style="flex: 1 1 auto">Files</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7fa3ae" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8.5 12.5l2.5 2.5 4.5-5.5"></path></svg><span>Tasks</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 8l4 4-4 4M12 16h7"></path></svg><span>Terminal</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="12" cy="12" r="8.5"></circle><circle cx="9" cy="9.5" r="1"></circle><circle cx="14.5" cy="9" r="1"></circle><circle cx="15.5" cy="14" r="1"></circle></svg><span>Theme</span></button>
+</div>
+<div style="flex: 1 1 auto; min-height: 16px"></div>
+<div style="padding: 0 12px 14px">
+<button type="button" aria-label="Settings" style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #7fa3ae"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"></path><circle cx="16" cy="7" r="2"></circle><circle cx="8" cy="17" r="2"></circle></svg></button>
+</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 26px 28px 32px; display: flex; flex-direction: column; gap: 16px">
+<div>
+<h1 style="margin: 0; font-size: 22px; line-height: 30px; font-weight: 600; color: #c4eefb">New agent</h1>
+<div style="color: #7fa3ae">Everything here can be changed later.</div>
+</div>
+
+<section aria-label="Identity" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">Identity</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 14px">
+<label style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Name</span><input type="text" value="{{name}}" onChange="{{onName}}" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #c4eefb"></label>
+<label style="flex: 2 1 280px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">What it's for</span><input type="text" value="{{role}}" onChange="{{onRole}}" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 14px 36px; margin-top: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Avatar</span>
+<div role="group" aria-label="Avatar" style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{avatars}}" as="a" hint-placeholder-count="6">
+<button type="button" aria-label="{{a.label}}" aria-pressed="{{a.on}}" onClick="{{a.pick}}" style="display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; padding: 0; background: {{a.bg}}; border: 2px solid {{a.ring}}; border-radius: 10px"><svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true"><path fill="{{a.color}}" d="{{a.d}}"></path></svg></button>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Colour</span>
+<div role="group" aria-label="Colour" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 48px">
+<sc-for list="{{colors}}" as="c" hint-placeholder-count="6">
+<button type="button" aria-label="{{c.label}}" aria-pressed="{{c.on}}" onClick="{{c.pick}}" style="width: 34px; height: 34px; padding: 0; background: {{c.hex}}; border: 3px solid #131519; border-radius: 50%; box-shadow: 0 0 0 2px {{c.ring}}"></button>
+</sc-for>
+</div>
+</div>
+</div>
+</section>
+
+<section aria-label="Runs on" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">Runs on</h2>
+<div role="group" aria-label="Runs on" style="display: flex; flex-wrap: wrap; gap: 10px">
+<sc-for list="{{runsList}}" as="r" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{r.on}}" onClick="{{r.pick}}" style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: {{r.bg}}; border: 1px solid {{r.border}}; border-radius: 10px; color: #9cdef2; text-align: left"><span style="font-weight: 600; color: #c4eefb">{{r.title}}</span><span style="font-size: 12px; line-height: 18px; color: #7fa3ae">{{r.hint}}</span></button>
+</sc-for>
+</div>
+
+<sc-if value="{{isHosted}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-top: 16px">
+<label style="flex: 1 1 220px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Agent</span><select style="height: 38px; box-sizing: border-box; padding: 0 10px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"><option>Claude Code</option><option>Codex</option></select></label>
+<button type="button" style="height: 38px; padding: 0 14px; background: transparent; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2">Sign in with your account</button>
+</div>
+<div style="margin-top: 10px; font-size: 12px; line-height: 18px; color: #7fa3ae">The agent brings its own tools. You still set its model, instructions, permissions and connectors here.</div>
+</sc-if>
+
+<sc-if value="{{isApi}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px">
+<label style="flex: 1 1 160px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Provider</span><select style="height: 38px; box-sizing: border-box; padding: 0 10px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"><option>Anthropic</option><option>OpenAI</option><option>Google</option><option>OpenRouter</option></select></label>
+<label style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Model</span><select style="height: 38px; box-sizing: border-box; padding: 0 10px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"><option>Claude Sonnet 5.5</option><option>Claude Opus 5.5</option><option>Claude Haiku 4.5</option></select></label>
+<label style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">API key</span><input type="password" placeholder="Paste your key" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 14px">
+<span style="font-size: 12px; color: #7fa3ae">Thinking effort</span>
+<div role="group" aria-label="Thinking effort" style="display: flex; padding: 2px; border: 1px solid #355a66; border-radius: 10px">
+<sc-for list="{{efforts}}" as="e" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{e.on}}" onClick="{{e.pick}}" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: {{e.bg}}; color: {{e.fg}}">{{e.label}}</button>
+</sc-for>
+</div>
+<span style="flex: 1 1 240px; font-size: 12px; line-height: 18px; color: #7fa3ae">The key is kept in your system keychain, never in the project.</span>
+</div>
+</sc-if>
+
+<sc-if value="{{isSelf}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px">
+<label style="flex: 2 1 280px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Server address</span><input type="url" placeholder="http://localhost:11434/v1" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"></label>
+<label style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Model name</span><input type="text" placeholder="As your server lists it" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"></label>
+</div>
+<div style="margin-top: 10px; font-size: 12px; line-height: 18px; color: #7fa3ae">Nothing leaves your machine. Quality and speed depend on the model you run.</div>
+</sc-if>
+</section>
+
+<section aria-label="Instructions" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">Instructions</h2>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">How it should work</span><textarea rows="4" value="{{instructions}}" onChange="{{onInstructions}}" style="box-sizing: border-box; width: 100%; resize: vertical; padding: 8px 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2; line-height: 22px"></textarea></label>
+<div style="display: flex; align-items: center; gap: 12px; margin-top: 12px">
+<button type="button" role="switch" aria-checked="{{notes.on}}" aria-label="Read the project notes before each task" onClick="{{toggleNotes}}" style="flex: none; width: 44px; height: 26px; padding: 3px; border: 0; border-radius: 13px; background: {{notes.bg}}"><span style="display: block; width: 20px; height: 20px; border-radius: 50%; background: {{notes.knob}}; transform: translateX({{notes.x}}); transition: transform 0.15s"></span></button>
+<span>Read the project notes before each task</span>
+</div>
+</section>
+
+<section aria-label="Tools and connectors" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #c4eefb">Tools and connectors</h2>
+<div style="margin-bottom: 8px; font-size: 12px; color: #7fa3ae">Ask means it stops and waits for you each time.</div>
+<sc-for list="{{tools}}" as="t" hint-placeholder-count="7">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 0; border-top: 1px solid #2c3640">
+<div style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; line-height: 20px"><span>{{t.label}}</span><span style="font-size: 12px; color: #7fa3ae">{{t.hint}}</span></div>
+<div role="group" aria-label="{{t.label}}" style="flex: none; display: flex; padding: 2px; border: 1px solid #355a66; border-radius: 10px">
+<button type="button" aria-pressed="{{t.offOn}}" onClick="{{t.setOff}}" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: {{t.offBg}}; color: {{t.offFg}}">Off</button>
+<button type="button" aria-pressed="{{t.askOn}}" onClick="{{t.setAsk}}" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: {{t.askBg}}; color: {{t.askFg}}">Ask</button>
+<button type="button" aria-pressed="{{t.allowOn}}" onClick="{{t.setAllow}}" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: {{t.allowBg}}; color: {{t.allowFg}}">Allow</button>
+</div>
+</div>
+</sc-for>
+<div style="padding-top: 12px; border-top: 1px solid #2c3640">
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; background: transparent; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>Add connector</span></button>
+</div>
+</section>
+
+<section aria-label="Working with others" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">Working with others</h2>
+<div style="display: flex; align-items: center; gap: 12px">
+<button type="button" role="switch" aria-checked="{{msg.on}}" aria-label="Can message other agents" onClick="{{toggleMsg}}" style="flex: none; width: 44px; height: 26px; padding: 3px; border: 0; border-radius: 13px; background: {{msg.bg}}"><span style="display: block; width: 20px; height: 20px; border-radius: 50%; background: {{msg.knob}}; transform: translateX({{msg.x}}); transition: transform 0.15s"></span></button>
+<span>Can message other agents</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; margin-top: 10px">
+<button type="button" role="switch" aria-checked="{{accept.on}}" aria-label="Takes tasks from other agents" onClick="{{toggleAccept}}" style="flex: none; width: 44px; height: 26px; padding: 3px; border: 0; border-radius: 13px; background: {{accept.bg}}"><span style="display: block; width: 20px; height: 20px; border-radius: 50%; background: {{accept.knob}}; transform: translateX({{accept.x}}); transition: transform 0.15s"></span></button>
+<span>Takes tasks from other agents</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px">
+<span style="font-size: 12px; color: #7fa3ae">Can give tasks to</span>
+<sc-for list="{{peers}}" as="p" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{p.on}}" onClick="{{p.toggle}}" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 8px; background: {{p.bg}}; border: 1px solid {{p.border}}; border-radius: 18px; color: {{p.fg}}"><svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 5px; background: {{p.tile}}"><path fill="{{p.color}}" d="{{p.d}}"></path></svg><span>{{p.name}}</span></button>
+</sc-for>
+</div>
+</section>
+
+<section aria-label="Limits" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">Limits</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 16px 28px">
+<label style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 12px; color: #7fa3ae"><span>Typing speed in the editor</span><span style="color: #c4eefb">{{speedLabel}}</span></span><input type="range" min="2" max="40" step="1" value="{{speed}}" onChange="{{onSpeed}}" style="width: 100%; height: 38px; margin: 0; accent-color: #e06c75"></label>
+<label style="flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Daily spending limit (USD)</span><input type="text" placeholder="No limit" style="height: 38px; box-sizing: border-box; padding: 0 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 14px">
+<span style="font-size: 12px; color: #7fa3ae">When it has nothing to do</span>
+<div role="group" aria-label="When it has nothing to do" style="display: flex; padding: 2px; border: 1px solid #355a66; border-radius: 10px">
+<sc-for list="{{idleList}}" as="i" hint-placeholder-count="2">
+<button type="button" aria-pressed="{{i.on}}" onClick="{{i.pick}}" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: {{i.bg}}; color: {{i.fg}}">{{i.label}}</button>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section aria-label="First task" style="padding: 16px 18px 18px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #c4eefb">First task</h2>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #7fa3ae">Optional. Leave empty to create it idle.</span><textarea rows="3" placeholder="What should it start on?" style="box-sizing: border-box; width: 100%; resize: vertical; padding: 8px 12px; background: #1e2228; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2; line-height: 22px"></textarea></label>
+</section>
+</main>
+
+<aside aria-label="Preview" style="flex: 1 1 340px; min-width: 0; box-sizing: border-box; padding: 26px 20px 32px; display: flex; flex-direction: column; gap: 14px; border-left: 1px solid #2c3640">
+<div style="font-size: 12px; color: #7fa3ae">In the sidebar</div>
+<div style="display: flex; align-items: center; gap: 10px; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: #111; border-radius: 10px">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: {{tile}}"><path fill="{{color}}" d="{{avatarPath}}"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; min-width: 0; font-weight: 600; color: #c4eefb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{nameShown}}</span><span style="font-size: 12px; color: #7fa3ae">idle</span><span style="width: 5px; height: 5px; border-radius: 50%; border: 2px solid #7fa3ae"></span></span><span style="font-size: 12px; color: #7fa3ae; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{runsLine}}</span></span>
+</div>
+
+<div style="font-size: 12px; color: #7fa3ae">In the editor</div>
+<div style="padding: 12px 14px 30px; background: #1e2228; border: 1px solid #2c3640; border-radius: 10px; white-space: nowrap; overflow: hidden"><span style="color: #c678dd">const </span>rule = <span style="position: relative; display: inline-block; width: 0; height: 17px; vertical-align: middle"><span style="position: absolute; left: 1px; top: 0; width: 2px; height: 17px; border-radius: 1px; background: {{color}}"></span><span style="position: absolute; left: 1px; top: 17px; padding: 0 7px; border-radius: 0 6px 6px 6px; background: {{color}}; color: #111; font-size: 11px; line-height: 16px; font-weight: 600; white-space: nowrap">{{nameShown}}</span></span></div>
+
+<div style="font-size: 12px; color: #7fa3ae">In chat</div>
+<div style="padding: 12px 14px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px"><svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 5px; background: {{tile}}"><path fill="{{color}}" d="{{avatarPath}}"></path></svg><span style="font-weight: 600; color: #c4eefb">{{nameShown}}</span></div>
+<div style="overflow-wrap: anywhere">{{roleShown}}</div>
+</div>
+
+<div style="font-size: 12px; color: #7fa3ae">What it may do</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: #131519; border: 1px solid #355a66; border-radius: 14px; font-size: 13px; line-height: 20px">
+<div><span style="color: #7fd99a; font-weight: 600">Allowed </span><span>{{sumAllow}}</span></div>
+<div><span style="color: #e5c07b; font-weight: 600">Asks first </span><span>{{sumAsk}}</span></div>
+<div><span style="color: #7fa3ae; font-weight: 600">Off </span><span style="color: #7fa3ae">{{sumOff}}</span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px">
+<button type="button" style="height: 44px; padding: 0 16px; background: #e06c75; border: 1px solid #e06c75; border-radius: 10px; color: #111; font-weight: 600">Create agent</button>
+<button type="button" style="height: 44px; padding: 0 16px; background: transparent; border: 1px solid #355a66; border-radius: 10px; color: #9cdef2">Cancel</button>
+</div>
+</aside>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2094}}'>
+class Component extends DCLogic {
+  state = {
+    name: 'Wren',
+    role: 'Writes and maintains the tests',
+    instructions: 'You write and maintain tests for this project. Keep test files small and focused. Never change application code without asking first.',
+    avatar: 3,
+    color: 3,
+    runs: 'api',
+    effort: 'medium',
+    levels: { read: 2, edit: 2, run: 1, commit: 2, push: 1, github: 1, slack: 0 },
+    give: { Kestrel: true, Moth: true, Juno: false },
+    msg: true,
+    accept: true,
+    notes: true,
+    speed: 12,
+    idle: 'queue'
+  };
+
+  tint(hex, alpha) {
+    var v = parseInt(hex.slice(1), 16);
+    return 'rgba(' + (v >> 16) + ', ' + ((v >> 8) & 255) + ', ' + (v & 255) + ', ' + alpha + ')';
+  }
+
+  paths() {
+    return [
+      { label: 'Bird', d: 'M8 4h4v4H8zM16 4h4v4h-4zM4 8h20v4H4zM4 12h4v4H4zM12 12h4v4h-4zM20 12h4v4h-4zM8 16h12v4H8zM4 20h4v4H4zM20 20h4v4h-4z' },
+      { label: 'Moth', d: 'M4 4h4v4H4zM20 4h4v4h-4zM4 8h8v4H4zM16 8h8v4h-8zM8 12h12v4H8zM4 16h8v4H4zM16 16h8v4h-8zM12 20h4v4h-4z' },
+      { label: 'Star', d: 'M12 4h4v4h-4zM8 8h12v4H8zM4 12h8v4H4zM16 12h8v4h-8zM8 16h12v4H8zM4 20h4v4H4zM12 20h4v4h-4zM20 20h4v4h-4z' },
+      { label: 'Owl', d: 'M4 4h8v4H4zM16 4h8v4h-8zM4 8h4v4H4zM12 8h4v4h-4zM20 8h4v4h-4zM4 12h20v4H4zM8 16h4v4H8zM16 16h4v4h-4zM8 20h12v4H8z' },
+      { label: 'Robot', d: 'M8 4h12v4H8zM4 8h4v4H4zM12 8h4v4h-4zM20 8h4v4h-4zM4 12h20v4H4zM12 16h4v4h-4zM4 20h8v4H4zM16 20h8v4h-8z' },
+      { label: 'Crab', d: 'M4 4h4v4H4zM20 4h4v4h-4zM8 8h12v4H8zM4 12h8v4H4zM16 12h8v4h-8zM4 16h20v4H4zM8 20h4v4H8zM16 20h4v4h-4z' }
+    ];
+  }
+
+  palette() {
+    return [
+      { label: 'Orange', hex: '#f0a35e' },
+      { label: 'Green', hex: '#7fd99a' },
+      { label: 'Violet', hex: '#c9a0f5' },
+      { label: 'Sky', hex: '#7fc4f5' },
+      { label: 'Yellow', hex: '#f2d06b' },
+      { label: 'Pink', hex: '#f29fc5' }
+    ];
+  }
+
+  toolList() {
+    return [
+      { id: 'read', label: 'Read files', hint: 'Anything in the project folder', short: 'read files' },
+      { id: 'edit', label: 'Edit files', hint: 'Changes appear live in the editor', short: 'edit files' },
+      { id: 'run', label: 'Run commands', hint: 'Tests, builds and scripts', short: 'run commands' },
+      { id: 'commit', label: 'Commit to its own branch', hint: 'Source control', short: 'commit' },
+      { id: 'push', label: 'Push and open pull requests', hint: 'Source control', short: 'push and pull requests' },
+      { id: 'github', label: 'GitHub', hint: 'Connector: issues and reviews', short: 'GitHub' },
+      { id: 'slack', label: 'Slack', hint: 'Connector: read and post messages', short: 'Slack' }
+    ];
+  }
+
+  seg(on) {
+    return { bg: on ? '#2c3640' : 'transparent', fg: on ? '#c4eefb' : '#7fa3ae' };
+  }
+
+  sw(on) {
+    return { on: on, bg: on ? '#e06c75' : '#2c3640', knob: on ? '#111111' : '#7fa3ae', x: on ? '18px' : '0px' };
+  }
+
+  renderVals() {
+    var self = this;
+    var s = this.state;
+    var palette = this.palette();
+    var paths = this.paths();
+    var color = palette[s.color].hex;
+    var tile = this.tint(color, 0.16);
+
+    var avatars = paths.map(function (p, i) {
+      var on = i === s.avatar;
+      return { label: p.label, d: p.d, on: on, color: color, bg: on ? tile : '#1e2228', ring: on ? color : 'transparent', pick: function () { self.setState({ avatar: i }); } };
+    });
+
+    var colors = palette.map(function (c, i) {
+      var on = i === s.color;
+      return { label: c.label, hex: c.hex, on: on, ring: on ? '#c4eefb' : 'transparent', pick: function () { self.setState({ color: i }); } };
+    });
+
+    var runsList = [
+      { id: 'hosted', title: 'Hosted agent', hint: 'Claude Code or Codex, signed in with your own account' },
+      { id: 'api', title: 'API key', hint: 'Any provider, billed per use' },
+      { id: 'self', title: 'Self-hosted', hint: 'A model on your own machine or server' }
+    ].map(function (r) {
+      var on = r.id === s.runs;
+      return { title: r.title, hint: r.hint, on: on, bg: on ? '#1d2127' : 'transparent', border: on ? '#e06c75' : '#355a66', pick: function () { self.setState({ runs: r.id }); } };
+    });
+
+    var efforts = ['low', 'medium', 'high'].map(function (id) {
+      var on = id === s.effort;
+      var look = self.seg(on);
+      return { label: id.charAt(0).toUpperCase() + id.slice(1), on: on, bg: look.bg, fg: look.fg, pick: function () { self.setState({ effort: id }); } };
+    });
+
+    var allow = [];
+    var ask = [];
+    var off = [];
+    var tools = this.toolList().map(function (t) {
+      var level = s.levels[t.id];
+      (level === 2 ? allow : level === 1 ? ask : off).push(t.short);
+      var set = function (value) {
+        return function () {
+          var next = {};
+          for (var key in self.state.levels) next[key] = self.state.levels[key];
+          next[t.id] = value;
+          self.setState({ levels: next });
+        };
+      };
+      var a = self.seg(level === 0);
+      var b = self.seg(level === 1);
+      var c = self.seg(level === 2);
+      return { label: t.label, hint: t.hint, offOn: level === 0, askOn: level === 1, allowOn: level === 2, offBg: a.bg, offFg: a.fg, askBg: b.bg, askFg: b.fg, allowBg: c.bg, allowFg: c.fg, setOff: set(0), setAsk: set(1), setAllow: set(2) };
+    });
+
+    var peers = [
+      { name: 'Kestrel', color: '#f0a35e', d: paths[0].d },
+      { name: 'Moth', color: '#7fd99a', d: paths[1].d },
+      { name: 'Juno', color: '#c9a0f5', d: paths[2].d }
+    ].map(function (p) {
+      var on = !!s.give[p.name];
+      return { name: p.name, color: p.color, d: p.d, tile: self.tint(p.color, 0.16), on: on, bg: on ? '#1d2127' : 'transparent', border: on ? p.color : '#355a66', fg: on ? '#c4eefb' : '#7fa3ae', toggle: function () {
+        var next = {};
+        for (var key in self.state.give) next[key] = self.state.give[key];
+        next[p.name] = !on;
+        self.setState({ give: next });
+      } };
+    });
+
+    var idleList = [{ id: 'wait', label: 'Wait for me' }, { id: 'queue', label: 'Pick up queued tasks' }].map(function (i) {
+      var on = i.id === s.idle;
+      var look = self.seg(on);
+      return { label: i.label, on: on, bg: look.bg, fg: look.fg, pick: function () { self.setState({ idle: i.id }); } };
+    });
+
+    var runsLine = s.runs === 'hosted' ? 'Claude Code, your own account' : s.runs === 'self' ? 'Self-hosted model' : 'Claude Sonnet 5.5, API key';
+
+    return {
+      name: s.name,
+      role: s.role,
+      instructions: s.instructions,
+      nameShown: s.name || 'Unnamed',
+      roleShown: s.role || 'No description yet',
+      onName: function (e) { self.setState({ name: e.target.value }); },
+      onRole: function (e) { self.setState({ role: e.target.value }); },
+      onInstructions: function (e) { self.setState({ instructions: e.target.value }); },
+      color: color,
+      tile: tile,
+      avatarPath: paths[s.avatar].d,
+      avatars: avatars,
+      colors: colors,
+      runsList: runsList,
+      isHosted: s.runs === 'hosted',
+      isApi: s.runs === 'api',
+      isSelf: s.runs === 'self',
+      runsLine: runsLine,
+      efforts: efforts,
+      tools: tools,
+      peers: peers,
+      idleList: idleList,
+      msg: this.sw(s.msg),
+      accept: this.sw(s.accept),
+      notes: this.sw(s.notes),
+      toggleMsg: function () { self.setState({ msg: !self.state.msg }); },
+      toggleAccept: function () { self.setState({ accept: !self.state.accept }); },
+      toggleNotes: function () { self.setState({ notes: !self.state.notes }); },
+      speed: s.speed,
+      speedLabel: s.speed + ' chars/s',
+      onSpeed: function (e) { self.setState({ speed: Number(e.target.value) }); },
+      sumAllow: allow.length ? allow.join(', ') : 'nothing',
+      sumAsk: ask.length ? ask.join(', ') : 'nothing',
+      sumOff: off.length ? off.join(', ') : 'nothing'
+    };
+  }
+}
+</script>
+</body>
+</html>

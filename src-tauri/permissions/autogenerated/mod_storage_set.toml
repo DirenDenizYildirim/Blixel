@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mod-storage-set"
+description = "Enables the mod_storage_set command without any pre-configured scope."
+commands.allow = ["mod_storage_set"]
+
+[[permission]]
+identifier = "deny-mod-storage-set"
+description = "Denies the mod_storage_set command without any pre-configured scope."
+commands.deny = ["mod_storage_set"]

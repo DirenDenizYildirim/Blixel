@@ -1,0 +1,14 @@
+{
+  "id": "example.word-count",
+  "name": "Word count",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Example",
+  "description": "Counts the words in the file you have open. The count updates when you save.",
+  "main": "main.js",
+  "permissions": ["files:read"],
+  "contributes": {
+    "commands": [{ "id": "count", "title": "Count words in this file", "key": "Ctrl+Alt+W" }],
+    "views": [{ "id": "count", "title": "Word count", "entry": "view.html", "minWidth": 200 }]
+  }
+}

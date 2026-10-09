@@ -1,0 +1,4 @@
+{
+  "folders": [".claude", ".codex", ".opencode", ".git"],
+  "files": ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "opencode.json", ".mcp.json"]
+}

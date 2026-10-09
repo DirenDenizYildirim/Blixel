@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workspace main screen</title>
+</head>
+<body>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#282c34}
+a{color:#e06c75}a:hover{color:#f0959c}
+button{font:inherit;cursor:pointer}
+textarea,input{font:inherit}
+::placeholder{color:#7fa3ae;opacity:1}
+button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid #e06c75;outline-offset:2px}
+@keyframes blink{50%{opacity:0}}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){*{animation:none !important}}
+</style>
+
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #282c34; color: #9cdef2; font-family: 'Fira Code', ui-monospace, Menlo, Consolas, monospace; font-size: 14px; line-height: 22px">
+
+<nav aria-label="Workspace" style="flex: 1 1 232px; min-width: 0; display: flex; flex-direction: column; background: #111; border-right: 1px solid #2c3640">
+<div style="display: flex; align-items: center; justify-content: space-between; min-height: 60px; box-sizing: border-box; padding: 0 18px 0 12px">
+<button type="button" aria-label="Collapse sidebar" style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #9cdef2"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<span style="font-size: 16px; font-weight: 600; color: #e06c75">blixel</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 10px">
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.5-4.5"></path></svg><span>Search</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" style="flex: none"><path d="M12 5v14M5 12h14"></path></svg><span>New agent</span></button>
+<div style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="9" cy="8" r="3.5"></circle><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"></path><path d="M16 4.6a3.5 3.5 0 010 6.8M18 14.3c2 .8 3.5 2.6 3.5 5.7"></path></svg><span>Agents</span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 2px 10px 0">
+<button type="button" aria-current="true" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: #1d2127; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #2e2118"><path fill="#f0a35e" d="M8 4h4v4H8zM16 4h4v4h-4zM4 8h20v4H4zM4 12h4v4H4zM12 12h4v4h-4zM20 12h4v4h-4zM8 16h12v4H8zM4 20h4v4H4zM20 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Kestrel</span><span style="font-size: 12px; color: #7fd99a">working</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #7fd99a; animation: pulse 1.4s ease-in-out infinite"></span></span><span style="font-size: 12px; color: #7fa3ae; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Claude Code</span></span>
+</button>
+<button type="button" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: transparent; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #17281d"><path fill="#7fd99a" d="M4 4h4v4H4zM20 4h4v4h-4zM4 8h8v4H4zM16 8h8v4h-8zM8 12h12v4H8zM4 16h8v4H4zM16 16h8v4h-8zM12 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Moth</span><span style="font-size: 12px; color: #e5c07b">queued</span><span style="width: 5px; height: 5px; border-radius: 50%; border: 2px solid #e5c07b"></span></span><span style="font-size: 12px; color: #7fa3ae; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Codex</span></span>
+</button>
+<button type="button" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; box-sizing: border-box; padding: 8px 10px; background: transparent; border: 0; border-radius: 10px; color: inherit; text-align: left">
+<svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 8px; background: #251d30"><path fill="#c9a0f5" d="M12 4h4v4h-4zM8 8h12v4H8zM4 12h8v4H4zM16 12h8v4h-8zM8 16h12v4H8zM4 20h4v4H4zM12 20h4v4h-4zM20 20h4v4h-4z"></path></svg>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px"><span style="display: flex; align-items: center; gap: 6px"><span style="flex: 1 1 auto; font-weight: 600">Juno</span><span style="font-size: 12px; color: #7fa3ae">idle</span><span style="width: 5px; height: 5px; border-radius: 50%; border: 2px solid #7fa3ae"></span></span><span style="font-size: 12px; color: #7fa3ae; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">OpenCode, local</span></span>
+</button>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 0">
+<button type="button" aria-expanded="true" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M3 6.5A1.5 1.5 0 014.5 5H9l2 2.5h8.5A1.5 1.5 0 0121 9v8.5a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"></path></svg><span style="flex: 1 1 auto">Files</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7fa3ae" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<button type="button" style="display: flex; align-items: center; min-height: 30px; padding: 0 10px 0 37px; background: transparent; border: 0; border-radius: 8px; color: #7fa3ae; text-align: left"><span>src / agents</span></button>
+<button type="button" aria-current="true" style="display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px 0 37px; background: #1d2127; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><span style="flex: 1 1 auto">router.ts</span><span title="Kestrel is here" style="width: 7px; height: 7px; border-radius: 50%; background: #f0a35e"></span><span title="Moth is here" style="width: 7px; height: 7px; border-radius: 50%; background: #7fd99a"></span><span title="You are here" style="width: 7px; height: 7px; border-radius: 50%; background: #e06c75"></span></button>
+<button type="button" style="display: flex; align-items: center; min-height: 30px; padding: 0 10px 0 37px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><span>router.test.ts</span></button>
+<button type="button" style="display: flex; align-items: center; min-height: 30px; padding: 0 10px 0 37px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><span>types.ts</span></button>
+<button type="button" style="display: flex; align-items: center; min-height: 30px; padding: 0 10px 0 37px; background: transparent; border: 0; border-radius: 8px; color: #7fa3ae; text-align: left"><span>docs</span></button>
+<button type="button" style="display: flex; align-items: center; min-height: 30px; padding: 0 10px 0 37px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><span>permissions.md</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; margin-top: 8px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8.5 12.5l2.5 2.5 4.5-5.5"></path></svg><span>Tasks</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 8l4 4-4 4M12 16h7"></path></svg><span>Terminal</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #9cdef2; text-align: left"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="flex: none"><circle cx="12" cy="12" r="8.5"></circle><circle cx="9" cy="9.5" r="1"></circle><circle cx="14.5" cy="9" r="1"></circle><circle cx="15.5" cy="14" r="1"></circle></svg><span>Theme</span></button>
+</div>
+
+<div style="flex: 1 1 auto; min-height: 16px"></div>
+<div style="padding: 0 12px 14px">
+<button type="button" aria-label="Settings" style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #7fa3ae"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"></path><circle cx="16" cy="7" r="2"></circle><circle cx="8" cy="17" r="2"></circle></svg></button>
+</div>
+</nav>
+
+<section aria-label="Chat with Kestrel" style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; box-sizing: border-box; padding: 6px 20px; font-size: 12px; color: #7fa3ae">
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: transparent; border: 0; border-radius: 8px; color: #7fa3ae; font-size: 12px"><span>Kestrel, Claude Code, your own account</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+</div>
+
+<div style="flex: 1 1 0; min-height: 440px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 6px 20px 16px">
+<div style="align-self: flex-end; max-width: 88%; box-sizing: border-box; padding: 12px 14px; border: 1px solid #355a66; border-radius: 14px">
+<div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 4px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #e06c75"></span><span style="font-weight: 600">You</span><span style="font-size: 12px; color: #7fa3ae">as a task</span></div>
+<div>Agents should only hand tasks to each other when a workspace rule allows it. Add the check and a test.</div>
+</div>
+
+<div style="box-sizing: border-box; padding: 12px 14px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px"><svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 5px; background: #2e2118"><path fill="#f0a35e" d="M8 4h4v4H8zM16 4h4v4h-4zM4 8h20v4H4zM4 12h4v4H4zM12 12h4v4h-4zM20 12h4v4h-4zM8 16h12v4H8zM4 20h4v4H4zM20 20h4v4h-4z"></path></svg><span style="font-weight: 600; color: #c4eefb">Kestrel</span></div>
+<div>On it. I'll add assertCanDelegate to router.ts and cover the no-rule case in the tests.</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 4px; margin-left: 24px; padding: 2px 0; border-left: 1px solid #7a4a52; font-size: 12px">
+<div style="position: relative; display: flex; align-items: baseline; gap: 10px; padding-left: 16px"><span style="position: absolute; left: -4px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #e06c75"></span><span style="font-weight: 600; color: #e06c75">READ</span><span style="flex: 1 1 auto; min-width: 0">router.ts, types.ts</span><span style="color: #7fa3ae">done</span></div>
+<div style="position: relative; display: flex; align-items: baseline; gap: 10px; padding-left: 16px"><span style="position: absolute; left: -4px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #e06c75"></span><span style="font-weight: 600; color: #e06c75">RUN</span><span style="flex: 1 1 auto; min-width: 0">npm test -- router</span><span style="color: #7fa3ae">1 failed</span></div>
+<div style="position: relative; display: flex; align-items: baseline; gap: 10px; padding-left: 16px"><span style="position: absolute; left: -4px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #e06c75"></span><span style="font-weight: 600; color: #e06c75">EDIT</span><span style="flex: 1 1 auto; min-width: 0">router.ts, line 24</span><span style="color: #f0a35e; animation: pulse 1.4s ease-in-out infinite">typing</span></div>
+</div>
+
+<div style="box-sizing: border-box; padding: 12px 14px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px"><svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 5px; background: #2e2118"><path fill="#f0a35e" d="M8 4h4v4H8zM16 4h4v4h-4zM4 8h20v4H4zM4 12h4v4H4zM12 12h4v4h-4zM20 12h4v4h-4zM8 16h12v4H8zM4 20h4v4H4zM20 20h4v4h-4z"></path></svg><span style="font-weight: 600; color: #c4eefb">Kestrel</span><span style="font-size: 12px; color: #7fa3ae">gave a task to</span><svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="flex: none; border-radius: 5px; background: #17281d"><path fill="#7fd99a" d="M4 4h4v4H4zM20 4h4v4h-4zM4 8h8v4H4zM16 8h8v4h-8zM8 12h12v4H8zM4 16h8v4H4zM16 16h8v4h-8zM12 20h4v4h-4z"></path></svg><span style="font-weight: 600; color: #c4eefb">Moth</span></div>
+<div>Update docs/permissions.md to describe delegation rules once router.ts lands.</div>
+<div style="margin-top: 6px; font-size: 12px; color: #7fa3ae">Moth accepted. Queued until the tests pass.</div>
+</div>
+
+<div style="box-sizing: border-box; padding: 12px 14px; background: #131519; border: 1px solid #355a66; border-radius: 14px">
+<div style="margin-bottom: 8px">Kestrel is asking to run a command</div>
+<div style="padding: 7px 12px; background: #2a1c21; border: 1px solid #7a4a52; border-radius: 8px; color: #f0959c; overflow-x: auto; white-space: nowrap">git commit -m "Add delegation check"</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px">
+<button type="button" style="height: 36px; padding: 0 14px; background: #e06c75; border: 1px solid #e06c75; border-radius: 8px; color: #111; font-weight: 600">Allow once</button>
+<button type="button" style="height: 36px; padding: 0 14px; background: transparent; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2">Always allow</button>
+<button type="button" style="height: 36px; padding: 0 14px; background: transparent; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2">Deny</button>
+</div>
+</div>
+</div>
+
+<div style="flex: none; margin: 0 20px 18px; padding: 12px 12px 10px; background: #111; border: 1px solid #355a66; border-radius: 16px">
+<textarea rows="2" aria-label="Message Kestrel" placeholder="Give Kestrel a task ..." style="display: block; width: 100%; box-sizing: border-box; resize: none; padding: 0 4px; background: transparent; border: 0; color: #9cdef2; line-height: 22px"></textarea>
+<div style="display: flex; align-items: center; gap: 8px; margin-top: 8px">
+<button type="button" aria-label="Attach a file" style="flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: #1d2127; border: 0; border-radius: 8px; color: #9cdef2"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+<button type="button" aria-label="Open Kestrel's shell" style="flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: #1d2127; border: 0; border-radius: 8px; color: #9cdef2"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l4 4-4 4M12 16h7"></path></svg></button>
+<span style="flex: 1 1 auto"></span>
+<div role="group" aria-label="Send as" style="display: flex; padding: 2px; border: 1px solid #355a66; border-radius: 10px">
+<button type="button" aria-pressed="false" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #7fa3ae">Chat</button>
+<button type="button" aria-pressed="true" style="height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: #2c3640; color: #c4eefb">Task</button>
+</div>
+<button type="button" aria-label="Send" style="flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: #e06c75; border: 0; border-radius: 8px; color: #111"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+</div>
+</div>
+</section>
+
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid #2c3640">
+<div style="display: flex; align-items: stretch; gap: 22px; min-height: 50px; box-sizing: border-box; padding: 0 20px; overflow-x: auto; border-bottom: 1px solid #2c3640">
+<button type="button" aria-current="true" style="flex: none; display: flex; align-items: center; gap: 8px; padding: 0 2px; background: transparent; border: 0; border-bottom: 2px solid #e06c75; color: #c4eefb; font-weight: 600"><span>router.ts</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #f0a35e"></span></button>
+<button type="button" style="flex: none; display: flex; align-items: center; padding: 0 2px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: #7fa3ae"><span>router.test.ts</span></button>
+<button type="button" style="flex: none; display: flex; align-items: center; padding: 0 2px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: #7fa3ae"><span>permissions.md</span></button>
+</div>
+
+<div style="flex: 1 1 auto; overflow-x: auto; margin: 14px 16px 0; padding: 12px 0; background: #1e2228; border: 1px solid #2c3640; border-radius: 14px; line-height: 22px">
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">1</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap"><span style="color: #c678dd">import </span>{ Agent, Message, Permission } <span style="color: #c678dd">from </span><span style="color: #e5c07b">"./types"</span>;</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">2</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap"><span style="color: #c678dd">import </span>{ bus } <span style="color: #c678dd">from </span><span style="color: #e5c07b">"../bus"</span>;</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">3</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap"><span style="color: #c678dd">import </span>{ workspace } <span style="color: #c678dd">from </span><span style="color: #e5c07b">"../workspace"</span>;</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">4</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">5</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; color: #8b93a1">/**</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">6</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 1ch; color: #8b93a1">* Routes a message from one agent to another.</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">7</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 1ch; color: #8b93a1">* Agents only talk to each other when the workspace allows it.</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">8</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 1ch; color: #8b93a1">*/</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">9</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap"><span style="color: #c678dd">export async function </span><span style="color: #61afef">route</span>(from: <span style="color: #56b6c2">Agent</span>, to: <span style="color: #56b6c2">Agent</span>, msg: <span style="color: #56b6c2">Message</span>) {</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">10</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch"><span style="color: #c678dd">if </span>(!from.permissions.includes(<span style="color: #56b6c2">Permission</span>.MessageAgents)) {</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">11</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 4ch"><span style="color: #c678dd">throw new </span><span style="color: #56b6c2">PermissionError</span>(<span style="color: #e5c07b">`${from.name} may not message other agents`</span>);</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">12</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch">}<span style="position: relative; display: inline-block; width: 0; height: 17px; vertical-align: middle"><span style="position: absolute; left: 1px; top: 0; width: 2px; height: 17px; border-radius: 1px; background: #e06c75; animation: blink 1.1s steps(1) infinite"></span><span style="position: absolute; left: 1px; top: 17px; padding: 0 7px; border-radius: 0 6px 6px 6px; background: #e06c75; color: #111; font-size: 11px; line-height: 16px; font-weight: 600; white-space: nowrap">you</span></span></span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">13</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">14</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch"><span style="color: #c678dd">if </span>(msg.kind === <span style="color: #e5c07b">"task"</span>) {</span></div>
+<div style="display: flex; height: 22px; align-items: center; background: rgba(127, 217, 154, 0.09)"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">15</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 4ch"><span style="color: #c678dd">await </span><span style="color: #61afef">assertCanDelegate</span>(from, to);</span></div>
+<div style="display: flex; height: 22px; align-items: center; background: rgba(127, 217, 154, 0.09)"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">16</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 4ch">to.queue.push({ ...msg, assignedBy: from.id });<span style="position: relative; display: inline-block; width: 0; height: 17px; vertical-align: middle"><span style="position: absolute; left: 1px; top: 0; width: 2px; height: 17px; border-radius: 1px; background: #7fd99a"></span><span style="position: absolute; left: 1px; bottom: 17px; padding: 0 7px; border-radius: 6px 6px 6px 0; background: #7fd99a; color: #111; font-size: 11px; line-height: 16px; font-weight: 600; white-space: nowrap">Moth, reading</span></span></span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">17</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch">}</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">18</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">19</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch">bus.emit(<span style="color: #e5c07b">"message"</span>, { from: from.id, to: to.id, msg });</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">20</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap; padding-left: 2ch"><span style="color: #c678dd">return </span>to.inbox.deliver(msg);</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">21</span><span style="flex: none; width: 24px"></span><span style="white-space: nowrap">}</span></div>
+<div style="display: flex; height: 22px; align-items: center"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">22</span></div>
+<div style="display: flex; height: 22px; align-items: center; background: rgba(240, 163, 94, 0.07)"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">23</span><span style="flex: none; width: 24px; text-align: center; color: #f0a35e">+</span><span style="white-space: nowrap"><span style="color: #c678dd">function </span><span style="color: #61afef">assertCanDelegate</span>(from: <span style="color: #56b6c2">Agent</span>, to: <span style="color: #56b6c2">Agent</span>) {</span></div>
+<div style="display: flex; height: 22px; align-items: center; background: rgba(240, 163, 94, 0.14)"><span style="flex: none; width: 40px; text-align: right; color: #c4eefb">24</span><span style="flex: none; width: 24px; text-align: center; color: #f0a35e">+</span><span style="white-space: nowrap; padding-left: 2ch"><span>const rule = workspace.rules.find((r) =&gt; </span><span style="position: relative; display: inline-block; width: 0; height: 17px; vertical-align: middle"><span style="position: absolute; left: 1px; top: 0; width: 2px; height: 17px; border-radius: 1px; background: #f0a35e"></span><span style="position: absolute; left: 1px; top: 17px; padding: 0 7px; border-radius: 0 6px 6px 6px; background: #f0a35e; color: #111; font-size: 11px; line-height: 16px; font-weight: 600; white-space: nowrap">Kestrel</span></span></span></div>
+<div style="display: flex; height: 22px; align-items: center; background: rgba(240, 163, 94, 0.07)"><span style="flex: none; width: 40px; text-align: right; color: #7f8a99">25</span><span style="flex: none; width: 24px; text-align: center; color: #f0a35e">+</span><span style="white-space: nowrap">}</span></div>
+</div>
+
+<section aria-label="Kestrel's shell" style="flex: none; margin: 12px 16px 0; background: #111; border: 1px solid #2c3640; border-radius: 14px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 8px 14px 2px; font-size: 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e06c75" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 8l4 4-4 4M12 16h7"></path></svg><span style="font-weight: 600; color: #c4eefb">Kestrel's shell</span><span style="color: #6b8a94">npm test -- router</span></div>
+<div style="overflow-x: auto; padding: 4px 14px 10px; font-size: 13px; line-height: 21px; white-space: nowrap">
+<div><span style="padding: 0 7px; border-radius: 4px; background: #e06c75; color: #111; font-weight: 600">FAIL</span><span> src/agents/router.test.ts</span></div>
+<div style="padding-left: 2ch"><span style="color: #7fd99a">pass </span>blocks agents without the message permission</div>
+<div style="padding-left: 2ch"><span style="color: #7fd99a">pass </span>queues delegated tasks with assignedBy</div>
+<div style="padding-left: 2ch"><span style="color: #f0959c">fail </span>rejects delegation when no rule matches</div>
+<div style="color: #6b8a94">Tests: 1 failed, 2 passed, 3 total</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-height: 52px; box-sizing: border-box; padding: 8px 20px; font-size: 12px; color: #7fa3ae">
+<button type="button" aria-pressed="true" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; background: transparent; border: 1px solid #355a66; border-radius: 8px; color: #9cdef2; font-size: 12px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #f0a35e"></span><span>Following Kestrel</span></button>
+<span>typing at 12 chars/s</span>
+<span style="margin-left: auto">Ln 24, Col 44</span>
+<span>TypeScript</span>
+</div>
+</main>
+
+</div>
+</body>
+</html>

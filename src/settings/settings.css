@@ -1,0 +1,147 @@
+/* The Settings page. It uses the agent form's page, panels and preview column
+   (styles.css) and adds theme and layout cards, keycaps and a live map of the
+   window. Colours come only from the theme tokens, except the theme cards,
+   which are drawn in each theme's own colours. This file loads before
+   styles.css, so a rule changing one of its classes needs a second class. */
+
+/* Two columns side by side; in a narrow window the map moves under the settings and the page scrolls as one. */
+.settings-page { container-type: inline-size; }
+.settings-body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+
+.settings-head { display: flex; align-items: flex-start; gap: 12px 16px; }
+.settings-page .hint-line { line-height: 18px; }
+
+/* The section bar stays at the top while the settings scroll under it. Sticking
+   counts from inside the scroller's padding, so it moves up by .form-main's. */
+.settings-nav {
+  position: sticky; top: -26px; z-index: 2;
+  display: flex; margin: -4px -28px -2px; padding: 8px 28px;
+  background: var(--bg);
+}
+.settings-nav .seg { flex-wrap: wrap; }
+.settings-nav .seg button:hover { color: var(--fg); }
+.settings-nav .seg button[aria-current] { background: var(--line); color: var(--strong); }
+.settings-main > .panel { scroll-margin-top: 60px; }
+
+/* Parts of a panel, each under its own small heading. */
+.set-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.set-block.first { margin-top: 14px; padding-top: 0; border-top: 0; }
+.settings-page h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--strong); }
+.set-block > h3 + .tool-row { margin-top: 4px; }
+.settings-note { margin-top: 12px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.settings-note .link-btn { margin-left: 6px; }
+
+/* Cards: a drawing on top, a name and a line under it. */
+.settings-grid { display: grid; gap: 10px; margin-top: 4px; }
+/* At most three themes or four layouts to a row, fewer where they would get too small. */
+.settings-grid.themes { grid-template-columns: repeat(auto-fill, minmax(max(190px, calc((100% - 20px) / 3)), 1fr)); }
+.settings-grid.presets { grid-template-columns: repeat(auto-fill, minmax(max(160px, calc((100% - 30px) / 4)), 1fr)); margin-top: 8px; }
+.choice.settings-card { min-width: 0; padding: 8px 8px 9px; }
+.settings-card > .theme-mock, .settings-card > .lmap { margin-bottom: 7px; }
+.settings-card > .choice-title, .settings-card > .choice-hint { padding: 0 3px; }
+.settings-card:hover:not([aria-pressed="true"]) { border-color: var(--muted); }
+
+/* A theme in miniature: sidebar, a chat card over its composer, and code. */
+.theme-mock {
+  display: flex; gap: 6px; width: 100%; aspect-ratio: 16 / 9; padding-right: 6px;
+  border: 1px solid; border-radius: 7px; overflow: hidden;
+}
+.theme-mock i { display: block; flex: none; }
+.tm-side { flex: 0 0 21%; display: flex; flex-direction: column; gap: 4px; padding: 7px 6px; }
+.tm-chat { flex: 0 0 31%; display: flex; flex-direction: column; justify-content: space-between; padding: 7px 0; }
+.tm-card { display: flex; flex-direction: column; gap: 3px; padding: 5px; border: 1px solid; border-radius: 4px; }
+.tm-composer {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 14px; padding: 0 3px 0 5px; border: 1px solid; border-radius: 4px;
+}
+.tm-code {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px;
+  margin: 7px 0; padding: 7px 6px; border: 1px solid; border-radius: 4px;
+}
+.tm-row { display: flex; gap: 3px; }
+.tm-in { padding-left: 10%; }
+.tm-bar { height: 3px; border-radius: 2px; }
+.tm-dot { width: 7px; height: 7px; margin-bottom: 3px; border-radius: 50%; }
+.tm-send { width: 7px; height: 7px; border-radius: 2px; }
+
+/* A layout in miniature, in the current theme: the sidebar strip and the columns of views. */
+.lmap {
+  display: flex; width: 100%; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+}
+.lmap-nav {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  padding: 8px 6px; background: var(--side);
+}
+.lmap[data-side="left"] .lmap-nav { border-right: 1px solid var(--line); }
+.lmap[data-side="right"] .lmap-nav { border-left: 1px solid var(--line); }
+.lmap-nav i { display: block; flex: none; }
+.lmap-brand { width: 45%; height: 4px; margin-bottom: 4px; border-radius: 2px; background: var(--accent); }
+.lmap-line { width: 75%; height: 3px; border-radius: 2px; background: var(--muted); opacity: 0.55; }
+.lmap-line.short { width: 50%; }
+.lmap-dot { width: 6px; height: 6px; align-self: center; border-radius: 50%; background: var(--muted); opacity: 0.55; }
+.lmap-nav[data-collapsed] { padding: 8px 0; align-items: center; }
+.lmap-nav[data-collapsed] .lmap-brand { width: 50%; }
+.lmap-cols { flex: 1 1 0; min-width: 0; display: flex; gap: 3px; padding: 4px; }
+.lmap-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.lmap-slot {
+  flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center;
+  padding: 0 3px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
+}
+.lmap-name {
+  min-width: 0; font-size: 10px; line-height: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.settings-aside .lmap-name { font-size: 11px; }
+.lmap[data-zen] .lmap-slot:not([data-zen]), .lmap[data-zen] .lmap-nav { opacity: 0.35; }
+.lmap-slot[data-zen] { border-color: var(--accent); }
+.lmap-slot[data-zen] .lmap-name { color: var(--strong); font-weight: 600; }
+
+/* Keys drawn as small keycaps. */
+.keycaps { flex: none; display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; }
+.keycap {
+  min-width: 22px; padding: 0 6px;
+  font: inherit; font-size: 11px; line-height: 18px; text-align: center; color: var(--strong);
+  background: var(--code); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px;
+}
+.tool-row > .keycaps { margin-left: auto; }
+
+.zen-text { max-width: 64ch; line-height: 20px; }
+.zen-keys { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; }
+.zen-key { display: flex; align-items: center; gap: 8px; }
+
+.keys-filter { width: 100%; max-width: 360px; margin: 4px 0 2px; appearance: none; }
+.keys-group { margin-top: 16px; }
+.keys-row {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 38px; padding: 4px 0; border-top: 1px solid var(--line);
+}
+.keys-empty { margin-top: 14px; }
+
+.about { display: flex; align-items: baseline; gap: 12px; }
+.about-name { font-size: 16px; font-weight: 600; color: var(--accent); }
+
+/* The aside: the live map, what it shows, and tips. */
+.form-preview.settings-aside { gap: 26px; }
+.aside-block { display: flex; flex-direction: column; gap: 14px; }
+.map-facts {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0;
+  font-size: 12px; line-height: 18px;
+}
+.map-facts dt { color: var(--muted); }
+.map-facts dd { min-width: 0; margin: 0; color: var(--strong); overflow-wrap: anywhere; }
+.may-do.tips { gap: 10px; }
+.inline-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 18px; vertical-align: -3px;
+  border: 1px solid var(--line); border-radius: 5px; color: var(--muted);
+}
+
+@container (max-width: 860px) {
+  .settings-body { flex-direction: column; overflow-y: auto; }
+  .settings-nav { top: 0; }
+  .settings-body > .form-main, .settings-body > .form-preview { flex: none; overflow: visible; }
+  .settings-body > .form-preview { padding: 22px 28px 32px; border-left: 0; border-top: 1px solid var(--line); }
+  .form-preview.settings-aside { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+  .aside-block { flex: 1 1 260px; max-width: 400px; }
+}

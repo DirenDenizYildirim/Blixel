@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Escape tests</title>
+  <style>
+    table { width: 100%; }
+    td { vertical-align: top; }
+    td.where { width: 1%; padding-right: 10px; color: var(--muted); white-space: nowrap; }
+    td.status { width: 1%; white-space: nowrap; font-weight: 600; }
+    td.detail { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    [data-status="blocked"] { color: var(--ok); }
+    [data-status="LEAKED"] { color: var(--danger-fg); }
+    [data-status="reachable"], [data-status="manual"] { color: var(--warn); }
+    [data-status="waiting"] { color: var(--muted); font-weight: 400; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+    section { margin-top: 18px; }
+    #manual-result { min-height: 22px; }
+  </style>
+</head>
+<body>
+  <h1>Escape tests</h1>
+  <p id="summary" class="muted">Running…</p>
+  <div class="actions">
+    <button id="run" type="button" class="primary">Run again</button>
+  </div>
+  <table>
+    <thead><tr><th>Where</th><th>Attempt</th><th>Result</th><th>Detail</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <section>
+    <h2>By hand</h2>
+    <p class="muted">These leave this page if they work, or turn this mod off when the limits hold, so they do not run on their own. The text under the buttons says what to expect. If example.com appears anywhere, that is a leak. Move or reopen this view to come back after one that opens another page here.</p>
+    <div class="actions">
+      <button id="nav-self" type="button">Open example.com in this view</button>
+      <button id="nav-other" type="button">Open another mod's page in this view</button>
+      <button id="hijack" type="button">Open a page that tries to take this view's connection</button>
+      <button id="nav-top" type="button">Send the app window to example.com</button>
+      <button id="nav-top-mod" type="button">Send the app window to another mod's page</button>
+      <button id="form" type="button">Submit a form to example.com</button>
+      <button id="burst" type="button">Make 300 calls at once</button>
+      <button id="flood" type="button">Make 5000 calls at once</button>
+      <button id="answers" type="button">Flood the app with answers to checks it never made</button>
+    </div>
+    <p id="manual-result" class="muted"></p>
+  </section>
+
+  <script src="report.js"></script>
+</body>
+</html>

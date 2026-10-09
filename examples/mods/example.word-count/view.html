@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Word count</title>
+  <style>
+    .count { margin: 4px 0 0; font-size: 28px; line-height: 36px; font-weight: 600; color: var(--strong); }
+    .file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <p class="file muted" id="file">No file open</p>
+  <p class="count" id="words">–</p>
+  <p class="muted" id="lines"></p>
+  <button id="recount" type="button">Count again</button>
+  <!-- Scripts in a mod page must be files of the mod: inline scripts do not run. -->
+  <script src="panel.js"></script>
+</body>
+</html>

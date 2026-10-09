@@ -1,0 +1,52 @@
+[package]
+name = "blixel"
+version = "0.1.0"
+description = "A workspace where one person and several AI agents work on a project together"
+authors = ["DirenDenizYildirim"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name (cargo#8519).
+name = "blixel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ignore = "0.4"
+agent-client-protocol = { version = "3.1", features = ["process"] }
+rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }
+axum = "0.8"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+tokio-util = "0.7"
+# Hashes of mod folders, and mod scripts embedded in their host page.
+sha2 = "0.10"
+base64 = "0.22"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The webview's own settings, which Tauri does not expose (mods/webview.rs).
+# The version Tauri uses, so its WebView handle is this crate's type.
+webkit2gtk = { version = "2", features = ["v2_40"] }
+
+[dev-dependencies]
+# The mock runtime, to check the command ACL without opening a window.
+tauri = { version = "2", features = ["test"] }
+rmcp = { version = "3.5", features = ["client", "transport-streamable-http-client-reqwest"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

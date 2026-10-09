@@ -1,0 +1,71 @@
+{
+  "id": "builtin.layouts",
+  "name": "Layouts",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Standard arrangements of the chat, the editor and the shell.",
+  "contributes": {
+    "layouts": [
+      {
+        "id": "default",
+        "label": "Default",
+        "columns": [
+          { "id": "c1", "width": 440, "slots": [{ "view": "chat", "open": true, "height": "fill" }] },
+          {
+            "id": "c2",
+            "width": "fill",
+            "slots": [
+              { "view": "editor", "open": true, "height": "fill" },
+              { "view": "shell", "open": true, "height": 150 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "editor-first",
+        "label": "Editor first",
+        "columns": [
+          {
+            "id": "c1",
+            "width": "fill",
+            "slots": [
+              { "view": "editor", "open": true, "height": "fill" },
+              { "view": "shell", "open": true, "height": 150 }
+            ]
+          },
+          { "id": "c2", "width": 400, "slots": [{ "view": "chat", "open": true, "height": "fill" }] }
+        ]
+      },
+      {
+        "id": "wide-editor",
+        "label": "Wide editor",
+        "columns": [
+          { "id": "c1", "width": 340, "slots": [{ "view": "chat", "open": true, "height": "fill" }] },
+          {
+            "id": "c2",
+            "width": "fill",
+            "slots": [
+              { "view": "editor", "open": true, "height": "fill" },
+              { "view": "shell", "open": false, "height": 150 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "stacked",
+        "label": "Stacked",
+        "columns": [
+          {
+            "id": "c1",
+            "width": 440,
+            "slots": [
+              { "view": "chat", "open": true, "height": "fill" },
+              { "view": "shell", "open": true, "height": 220 }
+            ]
+          },
+          { "id": "c2", "width": "fill", "slots": [{ "view": "editor", "open": true, "height": "fill" }] }
+        ]
+      }
+    ]
+  }
+}

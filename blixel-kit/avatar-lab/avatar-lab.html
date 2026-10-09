@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one large creature on a stage beside its controls, then the four types and a roster. */
+:root {
+  --bg: #282c34; --panel: #111111; --card: #131519; --field: #1e2228;
+  --line: #2c3640; --border: #355a66;
+  --fg: #9cdef2; --strong: #c4eefb; --muted: #7fa3ae;
+  --accent: #e06c75; --accent-ink: #111111;
+  --ok: #7fd99a; --warn: #e5c07b;
+  --av-l: 0.8; --av-c: 0.13;
+  --mono: 'Fira Code', ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f3efe6; --panel: #e9e4d8; --card: #fbf9f4; --field: #fbf9f4;
+    --line: #d6cfbf; --border: #b9b09c;
+    --fg: #3a3731; --strong: #1f1d19; --muted: #645e51;
+    --accent: #a93a27; --accent-ink: #ffffff;
+    --ok: #176b3b; --warn: #7a5600;
+    --av-l: 0.52; --av-c: 0.15;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f3efe6; --panel: #e9e4d8; --card: #fbf9f4; --field: #fbf9f4;
+  --line: #d6cfbf; --border: #b9b09c;
+  --fg: #3a3731; --strong: #1f1d19; --muted: #645e51;
+  --accent: #a93a27; --accent-ink: #ffffff;
+  --ok: #176b3b; --warn: #7a5600;
+  --av-l: 0.52; --av-c: 0.15;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 14px; line-height: 1.6; }
+.page { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 56px; display: flex; flex-direction: column; gap: 36px; }
+
+h1 { margin: 0; font-size: 26px; line-height: 1.25; font-weight: 600; color: var(--strong); text-wrap: balance; }
+h2 { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 600; color: var(--strong); text-wrap: balance; }
+.lead { margin: 6px 0 0; max-width: 62ch; color: var(--muted); }
+.hint { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.label { font-size: 12px; color: var(--muted); }
+
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The avatar itself: colour comes from --h, set per agent. */
+.av { display: block; width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 22%; overflow: hidden;
+  color: oklch(var(--av-l) var(--av-c) var(--h, 30));
+  background: color-mix(in oklch, currentColor 15%, var(--card)); }
+.av .ln { fill: none; stroke: currentColor; stroke-width: var(--sw, 3); stroke-linejoin: round; stroke-linecap: round; }
+.av .ping { fill: none; stroke: var(--warn); stroke-width: var(--sw, 3); }
+.av.small { --sw: 6; }
+.defs { position: absolute; width: 0; height: 0; }
+
+.stage { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.creature { flex: 0 1 240px; min-width: 160px; }
+.controls { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.namerow { display: flex; flex-wrap: wrap; gap: 8px; }
+.namerow input { flex: 1 1 180px; min-width: 0; height: 40px; padding: 0 12px; background: var(--field); border: 1px solid var(--border); border-radius: 8px; color: var(--strong); }
+.ghost { height: 40px; padding: 0 14px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); }
+.ghost:hover { background: var(--field); }
+
+.seg { display: inline-flex; flex-wrap: wrap; padding: 2px; border: 1px solid var(--border); border-radius: 10px; align-self: flex-start; }
+.seg button { height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--line); color: var(--strong); }
+
+.real { display: flex; flex-wrap: wrap; gap: 12px; }
+.mock { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 12px; background: var(--panel); border-radius: 10px; }
+.mock.chat { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.mock .av { flex: none; width: 32px; }
+.mock.chat .av { width: 20px; }
+.mock .who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.mock .nm { font-weight: 600; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mock .sub { font-size: 12px; color: var(--muted); }
+.status { flex: none; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.status i { width: 7px; height: 7px; border-radius: 50%; border: 2px solid currentColor; }
+.status[data-mode="working"] { color: var(--ok); }
+.status[data-mode="working"] i { background: currentColor; }
+.status[data-mode="waiting"] { color: var(--warn); }
+
+.shelf { display: flex; flex-direction: column; gap: 14px; }
+.shelfhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 820px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .grid, .grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; background: transparent; border: 1px solid var(--line); border-radius: 14px; color: var(--fg); text-align: center; }
+.tile:hover { border-color: var(--border); }
+.tile[aria-pressed="true"] { border-color: var(--accent); background: var(--card); color: var(--strong); }
+.tile span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+<style>body{margin:0}</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true"><defs>
+  <filter id="goo" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="3.2"></feGaussianBlur>
+    <feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -10"></feColorMatrix>
+  </filter>
+</defs></svg>
+
+<div class="page">
+  <header>
+    <h1>Avatar lab</h1>
+    <p class="lead">Each avatar is drawn from the agent's name. The same name always gives the same creature, and how it moves shows what the agent is doing.</p>
+  </header>
+
+  <section class="stage" aria-label="Avatar preview">
+    <div class="creature"><svg id="hero" class="av" viewBox="-50 -50 100 100" role="img" aria-label="Generated avatar"></svg></div>
+    <div class="controls">
+      <div class="field">
+        <label class="label" for="agent-name">Agent name</label>
+        <div class="namerow">
+          <input id="agent-name" type="text" value="Wren" maxlength="24" spellcheck="false">
+          <button class="ghost" id="random-name" type="button">Random name</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" id="mode-label">What the agent is doing</span>
+        <div class="seg" id="modes" role="group" aria-labelledby="mode-label">
+          <button type="button" data-mode="idle">Idle</button>
+          <button type="button" data-mode="working">Working</button>
+          <button type="button" data-mode="waiting">Waiting on you</button>
+        </div>
+        <p class="hint" id="mode-hint"></p>
+      </div>
+      <div class="field">
+        <span class="label">At the sizes the app uses</span>
+        <div class="real">
+          <div class="mock">
+            <svg id="side" class="av small" viewBox="-50 -50 100 100" aria-hidden="true"></svg>
+            <span class="who"><span class="nm" data-name></span><span class="sub">Sidebar, 32 px</span></span>
+            <span class="status" id="status"><span id="status-text"></span><i></i></span>
+          </div>
+          <div class="mock chat">
+            <svg id="chat" class="av small" viewBox="-50 -50 100 100" aria-hidden="true"></svg>
+            <span class="who"><span class="nm" data-name></span><span class="sub">Chat, 20 px</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shelf" aria-labelledby="types-title">
+    <div>
+      <h2 id="types-title">Four types, one name</h2>
+      <p class="hint">Blob and Goo are drawn smooth. The pixel versions are the same creature on a grid.</p>
+    </div>
+    <div class="grid four" id="types" role="group" aria-labelledby="types-title"></div>
+  </section>
+
+  <section class="shelf" aria-labelledby="roster-title">
+    <div class="shelfhead">
+      <div>
+        <h2 id="roster-title">One type, twelve agents</h2>
+        <p class="hint">Select one to load its name above.</p>
+      </div>
+      <button class="ghost" id="shuffle" type="button">Shuffle names</button>
+    </div>
+    <div class="grid" id="roster"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var TAU = Math.PI * 2;
+
+  // ---- Seeded randomness: a name always produces the same numbers ----
+  function hash(text) {
+    var h = 2166136261;
+    for (var i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rng(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // A repeatable 0..1 value for a seed and up to three whole numbers.
+  function noise(seed, a, b, c) {
+    var h = seed ^ Math.imul((a | 0) + 1, 73856093) ^ Math.imul((b | 0) + 1, 19349663) ^ Math.imul((c | 0) + 1, 83492791);
+    h = Math.imul(h ^ (h >>> 15), 2246822519); h ^= h >>> 13;
+    h = Math.imul(h, 3266489917); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function between(r, lo, hi) { return lo + r() * (hi - lo); }
+  function sign(r) { return r() < 0.5 ? -1 : 1; }
+  function norm(name) { return name.trim().toLowerCase() || 'unnamed'; }
+
+  // ---- Geometry helpers ----
+  function closed(points) {
+    var d = 'M';
+    for (var i = 0; i < points.length; i += 2) d += (i ? 'L' : '') + points[i].toFixed(1) + ' ' + points[i + 1].toFixed(1);
+    return d + 'Z';
+  }
+  function push(waves, angle, t) {
+    var k = 0;
+    for (var j = 0; j < waves.length; j++) k += waves[j].a * Math.sin(waves[j].n * angle + waves[j].p + waves[j].w * t);
+    return k;
+  }
+  // A circle of radius R pushed in and out by a few sine waves.
+  function wobbly(R, waves, t, amp, steps) {
+    var pts = [];
+    for (var i = 0; i < steps; i++) {
+      var a = i / steps * TAU, rad = R * (1 + amp * push(waves, a, t));
+      pts.push(rad * Math.cos(a), rad * Math.sin(a));
+    }
+    return pts;
+  }
+  function oval(el, cx, cy, rx, ry) {
+    el.setAttribute('cx', cx.toFixed(1)); el.setAttribute('cy', cy.toFixed(1));
+    el.setAttribute('rx', rx.toFixed(2)); el.setAttribute('ry', Math.max(0, ry).toFixed(2));
+  }
+  function dot(el, cx, cy, radius) {
+    el.setAttribute('cx', cx.toFixed(1)); el.setAttribute('cy', cy.toFixed(1)); el.setAttribute('r', Math.max(0, radius).toFixed(2));
+  }
+
+  // ---- Recipes. A smooth type and its pixel twin read the same recipe, so they are the same creature. ----
+  function blobRecipe(r) {
+    var waves = [2, 3, 4, 5].map(function (n) { return { n: n, a: between(r, 0.03, 0.1), p: r() * TAU, w: between(r, 0.5, 1.4) * sign(r) }; });
+    return { waves: waves, eyes: 1 + Math.floor(r() * 3) };
+  }
+  function gooRecipe(r) {
+    var core = between(r, 17, 21), count = 3 + Math.floor(r() * 2), drops = [];
+    for (var i = 0; i < count; i++) drops.push({ far: between(r, 14, 25), size: between(r, 8, 12), w: between(r, 0.5, 1.3) * sign(r), p: r() * TAU, beat: between(r, 0.6, 1.4) });
+    return { core: core, drops: drops, eyes: Math.min(2, 1 + Math.floor(r() * 3)) };
+  }
+  // Where the goo's core and droplets are at time t.
+  function gooBalls(recipe, t, amp) {
+    var cx = 2 * Math.sin(t * 0.7), cy = 2 * Math.cos(t * 0.5);
+    var balls = [{ x: cx, y: cy, r: recipe.core * (1 + 0.05 * amp * Math.sin(t * 2)) }];
+    recipe.drops.forEach(function (d) {
+      var far = d.far * (0.75 + 0.35 * amp * Math.sin(t * d.beat + d.p)), a = d.p + t * d.w;
+      balls.push({ x: cx + far * Math.cos(a), y: cy + far * Math.sin(a), r: d.size });
+    });
+    return balls;
+  }
+
+  // ---- Eyes for the smooth creatures. `look` says where to gaze and how open they are. ----
+  function smoothEyes(r, n, scale) {
+    var big = r() < 0.55, size = (big ? between(r, 5, 7) : between(r, 3.2, 4.6)) * scale;
+    if (n === 3) size = Math.min(size, (big ? 5 : 3.8) * scale);
+    var gap = Math.max(between(r, 10, 15) * scale, size * 2 + 3), y = between(r, -8, 2) * scale, phase = r() * 8, html = '';
+    for (var i = 0; i < n; i++) html += '<ellipse fill="var(--card)"/>' + (big ? '<circle fill="currentColor"/>' : '');
+    return { html: html, pose: function (k, at, ox, oy, t, look) {
+      var blink = ((t * 0.3 + phase) % 1) < 0.045 ? 0.1 : 1, open = Math.min(1.2, look.open) * blink;
+      for (var i = 0; i < n; i++) {
+        var cx = ox + (i - (n - 1) / 2) * gap, cy = oy + y;
+        if (big) {
+          var pupil = size * 0.46, reach = (size - pupil) * 0.9;
+          oval(k[at + i * 2], cx, cy, size, size * open);
+          dot(k[at + i * 2 + 1], cx + look.lx * reach, cy + look.ly * reach * Math.min(1, open), open < 0.35 ? 0 : pupil);
+        } else {
+          oval(k[at + i], cx + look.lx * 2.6, cy + look.ly * 2, size, size * open);
+        }
+      }
+    } };
+  }
+
+  // ---- The pixel creatures: an 11 by 11 grid, redrawn a few times a second so the motion is chunky. ----
+  var CELLS = 11, CELL = 8, EDGE = -44;
+  function pixelCreature(r, eyes, eyeRow, inside) {
+    var phase = r() * 8, last = '';
+    return { html: '<path fill="currentColor"/>', pose: function (k, t, e, look) {
+      var tick = Math.floor(t * 7), sx = Math.round(look.lx), sy = Math.round(look.ly * 0.8);
+      var shut = look.open < 0.5 || ((t * 0.3 + phase) % 1) < 0.05, key = tick + '|' + sx + '|' + sy + '|' + shut + '|' + look.mode;
+      if (key === last) return;
+      last = key;
+      var test = inside(tick / 7, e), d = '';
+      for (var gy = 0; gy < CELLS; gy++) for (var gx = 0; gx < CELLS; gx++) {
+        if (!test(EDGE + (gx + 0.5) * CELL, EDGE + (gy + 0.5) * CELL)) continue;
+        var col = gx - sx;
+        if (!shut && gy === eyeRow + sy && (eyes === 1 ? col === 5 : eyes === 2 ? (col === 4 || col === 6) : (col === 3 || col === 5 || col === 7))) continue;
+        d += 'M' + (EDGE + gx * CELL) + ' ' + (EDGE + gy * CELL) + 'h' + CELL + 'v' + CELL + 'h-' + CELL + 'z';
+      }
+      k[0].setAttribute('d', d);
+    } };
+  }
+
+  // ---- The four types. Each returns markup plus a function that poses it at time t. ----
+  var STYLES = {
+    blob: { label: 'Blob', recipe: 'blob', make: function (r) {
+      var recipe = blobRecipe(r), face = smoothEyes(r, recipe.eyes, 1), feelers = r() < 0.4, fx = between(r, 6, 11), fp = r() * TAU;
+      var first = feelers ? 3 : 0;
+      var html = (feelers ? '<path class="ln"/><circle fill="currentColor"/><circle fill="currentColor"/>' : '') + '<path fill="currentColor"/>' + face.html;
+      return { html: html, pose: function (k, t, e, look) {
+        if (feelers) {
+          var sway = 4 * Math.sin(t * 1.3 + fp), lx = -fx - 3 + sway, rx = fx + 3 + sway;
+          k[0].setAttribute('d', 'M' + (-fx).toFixed(1) + ' -20L' + lx.toFixed(1) + ' -41M' + fx.toFixed(1) + ' -20L' + rx.toFixed(1) + ' -41');
+          dot(k[1], lx, -41, 3.2); dot(k[2], rx, -41, 3.2);
+        }
+        k[first].setAttribute('d', closed(wobbly(feelers ? 28 : 31, recipe.waves, t, e.amp, 72)));
+        face.pose(k, first + 1, 0, feelers ? 3 : 0, t, look);
+      } };
+    } },
+
+    goo: { label: 'Goo', recipe: 'goo', make: function (r) {
+      var recipe = gooRecipe(r), face = smoothEyes(r, recipe.eyes, 0.8), html = '<g filter="url(#goo)">';
+      for (var i = 0; i <= recipe.drops.length; i++) html += '<circle fill="currentColor"/>';
+      return { html: html + '</g>' + face.html, pose: function (k, t, e, look) {
+        var balls = gooBalls(recipe, t, e.amp), circles = k[0].children;
+        for (var i = 0; i < balls.length; i++) dot(circles[i], balls[i].x, balls[i].y, balls[i].r);
+        face.pose(k, 1, balls[0].x, balls[0].y + 2, t, look);
+      } };
+    } },
+
+    pixelblob: { label: 'Pixel blob', recipe: 'blob', make: function (r) {
+      var recipe = blobRecipe(r);
+      return pixelCreature(r, recipe.eyes, 4, function (t, e) {
+        return function (x, y) { return Math.hypot(x, y) < 31 * (1 + 1.2 * e.amp * push(recipe.waves, Math.atan2(y, x), t)); };
+      });
+    } },
+
+    pixelgoo: { label: 'Pixel goo', recipe: 'goo', make: function (r) {
+      var recipe = gooRecipe(r);
+      return pixelCreature(r, recipe.eyes, 5, function (t, e) {
+        var balls = gooBalls(recipe, t, e.amp);
+        return function (x, y) {                                     // inside when the pull of all the balls adds up to 1
+          var pull = 0;
+          for (var i = 0; i < balls.length; i++) { var dx = x - balls[i].x, dy = y - balls[i].y; pull += balls[i].r * balls[i].r / (dx * dx + dy * dy + 0.01); }
+          return pull >= 1;
+        };
+      });
+    } }
+  };
+  var STYLE_IDS = Object.keys(STYLES);
+
+  // ---- One avatar bound to one <svg>. It owns the gaze, the bounce and the "needs you" ring. ----
+  function avatar(svg) {
+    var key = '', seed = 0, made = null, body = null, kids = null, ping = null, box = null, offset = 0;
+    var look = { lx: 0, ly: 0, open: 1, mode: 'working' };
+    return {
+      set: function (name, style) {
+        var id = style + '|' + norm(name);
+        if (id === key) return;
+        key = id;
+        seed = hash(norm(name));
+        offset = (seed % 1000) / 1000 * TAU;
+        svg.style.setProperty('--h', ((seed % 3600) / 10).toFixed(1));
+        made = STYLES[style].make(rng(seed ^ hash(STYLES[style].recipe)));
+        svg.innerHTML = '<g>' + made.html + '</g><circle class="ping" r="0"/>';
+        body = svg.firstChild; ping = svg.lastChild;
+        kids = Array.prototype.slice.call(body.children);
+      },
+      measure: function () { box = svg.getBoundingClientRect(); },
+      draw: function (t, energy, mode, real, dt, pointer, still) {
+        var want;
+        if (mode === 'idle') {
+          want = { lx: 0, ly: 0.5, open: 0.2 };                                   // dozing
+        } else if (mode === 'working') {
+          var hop = Math.floor(real * 1.3 + offset);                              // eyes dart to a new spot now and then
+          want = { lx: noise(seed, hop, 1, 0) * 2 - 1, ly: noise(seed, hop, 2, 0) * 1.4 - 0.6, open: 1 };
+        } else {
+          want = { lx: 0, ly: -0.2, open: 1.15 };                                 // watching the pointer
+          if (pointer && box) {
+            var dx = pointer.x - (box.left + box.width / 2), dy = pointer.y - (box.top + box.height / 2), far = Math.hypot(dx, dy) || 1, pull = Math.min(1, far / 90);
+            want.lx = dx / far * pull; want.ly = dy / far * pull;
+          }
+        }
+        var ease = still ? 1 : 1 - Math.exp(-dt * 9);
+        look.lx += (want.lx - look.lx) * ease; look.ly += (want.ly - look.ly) * ease; look.open += (want.open - look.open) * ease;
+        look.mode = mode;
+        made.pose(kids, t, energy, look);
+        var waiting = mode === 'waiting' && !still;
+        body.setAttribute('transform', 'translate(0 ' + (waiting ? -4 * Math.abs(Math.sin(real * 3.4 + offset)) : 0).toFixed(2) + ')');
+        if (waiting) {
+          var p = (real * 0.6) % 1;
+          ping.setAttribute('r', (28 + 19 * p).toFixed(1));
+          ping.setAttribute('opacity', (1 - p).toFixed(2));
+        } else {
+          ping.setAttribute('opacity', '0');
+        }
+      }
+    };
+  }
+
+  // ---- Page state ----
+  var ENERGY = { idle: { speed: 0.35, amp: 0.6 }, working: { speed: 1.25, amp: 1.25 }, waiting: { speed: 0.5, amp: 0.8 } };
+  var STATUS = { idle: 'idle', working: 'working', waiting: 'waiting on you' };
+  var HINTS = { idle: 'Dozing: slow, with its eyes nearly shut.', working: 'Busy: quick, with its eyes darting about.', waiting: 'Needs you: it bounces and watches your pointer.' };
+  var POOL = ['Kestrel', 'Moth', 'Juno', 'Heron', 'Lark', 'Cicada', 'Ibis', 'Tern', 'Mantis', 'Sable', 'Quill', 'Ember', 'Wren', 'Finch', 'Otter', 'Lynx', 'Pike', 'Vole', 'Rook', 'Newt', 'Saffron', 'Basalt', 'Thistle', 'Onyx', 'Marlow', 'Sprocket', 'Nimbus', 'Tansy'];
+  var state = { name: 'Wren', style: 'blob', mode: 'working', roster: POOL.slice(0, 12) };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var input = $('agent-name');
+  var hero = avatar($('hero')), side = avatar($('side')), chat = avatar($('chat'));
+  var drawn = [hero, side, chat];
+  var blank = '<svg class="av" viewBox="-50 -50 100 100" aria-hidden="true"></svg><span></span>';
+
+  var styleTiles = STYLE_IDS.map(function (id) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'tile'; b.innerHTML = blank;
+    b.lastChild.textContent = STYLES[id].label;
+    b.addEventListener('click', function () { state.style = id; sync(); });
+    $('types').appendChild(b);
+    var a = avatar(b.firstChild); drawn.push(a);
+    return { id: id, button: b, av: a };
+  });
+
+  var rosterTiles = state.roster.map(function (_, i) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'tile'; b.innerHTML = blank;
+    b.addEventListener('click', function () { state.name = state.roster[i]; input.value = state.name; sync(); });
+    $('roster').appendChild(b);
+    var a = avatar(b.firstChild); drawn.push(a);
+    return { button: b, av: a, label: b.lastChild };
+  });
+
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var clock = 7.3, real = 0, last = performance.now(), pointer = null, stale = true;
+
+  function sync() {
+    var shown = state.name.trim() || 'Unnamed';
+    hero.set(state.name, state.style); side.set(state.name, state.style); chat.set(state.name, state.style);
+    $('hero').setAttribute('aria-label', 'Avatar for ' + shown + ', ' + STYLES[state.style].label);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-name]'), function (el) { el.textContent = shown; });
+    styleTiles.forEach(function (s) { s.av.set(state.name, s.id); s.button.setAttribute('aria-pressed', String(s.id === state.style)); });
+    rosterTiles.forEach(function (tile, i) {
+      tile.av.set(state.roster[i], state.style);
+      tile.label.textContent = state.roster[i];
+      tile.button.setAttribute('aria-pressed', String(norm(state.roster[i]) === norm(state.name)));
+    });
+    Array.prototype.forEach.call($('modes').children, function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)); });
+    $('status').dataset.mode = state.mode;
+    $('status-text').textContent = STATUS[state.mode];
+    $('mode-hint').textContent = HINTS[state.mode];
+    stale = true;
+    if (still) paint(0);
+  }
+
+  input.addEventListener('input', function () { state.name = input.value; sync(); });
+  $('random-name').addEventListener('click', function () {
+    var next;
+    do { next = POOL[Math.floor(Math.random() * POOL.length)]; } while (norm(next) === norm(state.name));
+    state.name = next; input.value = next; sync();
+  });
+  $('modes').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    state.mode = b.dataset.mode; sync();
+  });
+  $('shuffle').addEventListener('click', function () {
+    var bag = POOL.slice();
+    for (var i = bag.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var tmp = bag[i]; bag[i] = bag[j]; bag[j] = tmp; }
+    state.roster = bag.slice(0, 12); sync();
+  });
+  window.addEventListener('pointermove', function (ev) { pointer = { x: ev.clientX, y: ev.clientY }; }, { passive: true });
+  window.addEventListener('scroll', function () { stale = true; }, { passive: true });
+  window.addEventListener('resize', function () { stale = true; });
+
+  // ---- Animation loop. The clock runs faster or slower with the agent's state. ----
+  function paint(dt) {
+    var i;
+    if (stale) { for (i = 0; i < drawn.length; i++) drawn[i].measure(); stale = false; }
+    for (i = 0; i < drawn.length; i++) drawn[i].draw(clock, ENERGY[state.mode], state.mode, real, dt, pointer, still);
+  }
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    clock += dt * ENERGY[state.mode].speed; real += dt;
+    paint(dt);
+    requestAnimationFrame(frame);
+  }
+
+  sync();
+  paint(0);
+  if (!still) requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

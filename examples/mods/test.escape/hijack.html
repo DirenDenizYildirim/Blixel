@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Escape tests: taking a connection</title>
+  <style>
+    #result { font-weight: 600; }
+    [data-status="blocked"] { color: var(--ok); }
+    [data-status="LEAKED"] { color: var(--danger-fg); }
+  </style>
+</head>
+<body>
+  <h1>Taking a connection</h1>
+  <p id="result">Waiting for a connection…</p>
+  <p class="muted">This page was opened inside the Escape tests view after that view had connected. The app connects only the first page of a frame, and reads nothing from a port until the page sends back the key from its frame's address, which this page does not have. Expected: "blocked", and a failure for this mod on the Mods page. Move or reopen the view to get back.</p>
+  <script src="hijack.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+/* Agent avatars (Avatar.tsx). Colour comes from --h, set per avatar.
+   --av-l, --av-c, --card and --warn are defined globally by the app. */
+.av {
+  display: block;
+  flex: none;
+  border-radius: 22%;
+  overflow: hidden;
+  color: oklch(var(--av-l) var(--av-c) var(--h, 30));
+  background: color-mix(in oklch, currentColor 15%, var(--card));
+}
+.av .ln { fill: none; stroke: currentColor; stroke-width: var(--sw, 3); stroke-linejoin: round; stroke-linecap: round; }
+.av .ping { fill: none; stroke: var(--warn); stroke-width: var(--sw, 3); }
+.av .eye { fill: var(--card); }
+.av.small { --sw: 6; }

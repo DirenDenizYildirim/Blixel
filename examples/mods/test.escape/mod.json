@@ -1,0 +1,53 @@
+{
+  "id": "test.escape",
+  "name": "Escape tests",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Blixel tests",
+  "description": "For manual regression checks of the mod sandbox. Its code and its view try every known way out and show each result as blocked or LEAKED. It asks for no permissions, on purpose. Not for everyday use.",
+  "icon": {
+    "pixels": [
+      "................",
+      ".....oooooo.....",
+      "....oddddddo....",
+      "....odoooodo....",
+      "....odo..odo....",
+      "....odo..odo....",
+      "..oooooooooooo..",
+      "..ollllllllllo..",
+      "..ommmmmmmmmmo..",
+      "..ommmmkkmmmmo..",
+      "..ommmmkkmmmmo..",
+      "..ommmmkkmmmmo..",
+      "..ommmmmmmmmmo..",
+      "..oeeeeeeeeeeo..",
+      "..oooooooooooo..",
+      "................"
+    ],
+    "colors": {
+      "o": "#262b36",
+      "d": "#8a93a6",
+      "l": "#f2cf7a",
+      "m": "#d9a441",
+      "e": "#a3742a",
+      "k": "#262b36"
+    }
+  },
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "run",
+        "title": "Escape tests: Run again"
+      }
+    ],
+    "views": [
+      {
+        "id": "report",
+        "title": "Escape tests",
+        "entry": "report.html",
+        "minWidth": 360
+      }
+    ]
+  }
+}
