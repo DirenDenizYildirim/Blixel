@@ -1,24 +1,26 @@
 import { useEffect } from "react";
+import { AskCard } from "./components/AskCard";
 import { checkDisk } from "./editor/sessions";
 import { registerBuiltinViews } from "./layout/builtin";
 import { registerLayoutCommands } from "./layout/commands";
 import { Workspace } from "./layout/Workspace";
-import { playOpeningScene } from "./model/mock-agent";
+import { loadSettings } from "./model/app-settings";
+import { startProjects } from "./model/projects";
 import { listenToCore } from "./model/real-agent";
-import { openFile, refreshTree, useStore } from "./model/store";
+import { useStore } from "./model/store";
 
 // The default layout needs its views before the first render.
 registerBuiltinViews();
 
 export default function App() {
   const notice = useStore((s) => s.notice);
+  const ready = useStore((s) => s.ready);
 
   useEffect(() => {
     void listenToCore();
-    void refreshTree().then(() => {
-      openFile("src/agents/router.ts");
-      playOpeningScene();
-    });
+    void loadSettings();
+    // The last project, or the demo with its opening scene.
+    void startProjects();
     registerLayoutCommands();
   }, []);
 
@@ -31,12 +33,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <Workspace />
+      {ready && <Workspace />}
       {notice && (
         <div className="notice" role="status">
           {notice}
         </div>
       )}
+      <AskCard />
     </div>
   );
 }

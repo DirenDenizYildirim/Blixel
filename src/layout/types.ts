@@ -2,7 +2,7 @@
 // each a stack of views. Zen shows one view alone over an unchanged layout.
 
 /** A view the layout can place: built in, or `mod:<mod id>:<view id>` from a mod. */
-export type ViewId = "chat" | "editor" | "shell" | `mod:${string}:${string}`;
+export type ViewId = "chat" | "editor" | "shell" | "tasks" | `mod:${string}:${string}`;
 
 export interface Slot {
   view: ViewId;
@@ -42,7 +42,15 @@ export interface LayoutPreset {
 
 /** The default: chat, then the editor with the selected agent's shell under it (the approved main screen). */
 export const DEFAULT_COLUMNS: Column[] = [
-  { id: "c1", width: 440, slots: [{ view: "chat", open: true, height: "fill" }] },
+  {
+    id: "c1",
+    width: 440,
+    slots: [
+      { view: "chat", open: true, height: "fill" },
+      // The selected agent's tasks: closed until opened, so the default screen stays as approved.
+      { view: "tasks", open: false, height: 220 },
+    ],
+  },
   {
     id: "c2",
     width: "fill",

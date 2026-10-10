@@ -7,9 +7,10 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
-use axum::extract::Request;
+use axum::extract::{ConnectInfo, Request};
 use axum::http::{header::AUTHORIZATION, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
@@ -41,6 +42,9 @@ const MAX_OUTPUT_CHARS: usize = 30_000;
 pub struct BlixelTools {
     rt: Arc<AgentRuntime>,
     root: PathBuf,
+    /// The tool server's stop: cancelled when the session ends (Stop, a
+    /// project switch, the agent exiting), and commands still running stop with it.
+    stop: CancellationToken,
     #[allow(dead_code, reason = "read by the tool_handler macro")]
     tool_router: ToolRouter<Self>,
 }
@@ -98,7 +102,7 @@ fn done(text: impl Into<String>) -> Result<CallToolResult, ErrorData> {
 #[tool_router]
 impl BlixelTools {
     pub fn new(rt: Arc<AgentRuntime>, root: PathBuf) -> Self {
-        Self { rt, root, tool_router: Self::tool_router() }
+        Self { rt, root, stop: CancellationToken::new(), tool_router: Self::tool_router() }
     }
 
     #[tool(
@@ -191,7 +195,12 @@ impl BlixelTools {
             The user watches the output live in this agent's shell.",
         meta = always_load()
     )]
-    async fn bash(&self, Parameters(a): Parameters<BashArgs>) -> Result<CallToolResult, ErrorData> {
+    async fn bash(&self, Parameters(a): Parameters<BashArgs>, ct: CancellationToken) -> Result<CallToolResult, ErrorData> {
+        // rmcp runs each call in its own task and only signals a cancel, so the
+        // command watches for each way it can be stopped: the agent's program
+        // cancelling the call, the user's Stop, and the session ending. Taken
+        // now: Stop renews the agent's token for the commands after it.
+        let stop = [ct, self.rt.commands_stop(), self.stop.clone()];
         if a.run_in_background {
             return fail("Background commands are not available in Blixel yet. Run the command in the foreground with a timeout.");
         }
@@ -213,19 +222,29 @@ impl BlixelTools {
                 return fail("The user denied this command.");
             }
         }
+        // Stopped while the user was deciding: nobody waits for the output any more.
+        if stop.iter().any(CancellationToken::is_cancelled) {
+            self.log("RUN", &a.command, "stopped", false, false);
+            return fail("Stopped.");
+        }
         let timeout = a.timeout.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
         let entry = self.log("RUN", &a.command, "running", true, false);
         let shown = a.description.as_deref().map(|d| format!("{} ({d})", a.command)).unwrap_or_else(|| a.command.clone());
         self.rt.events.shell(&self.rt.id, Some(&a.command), &format!("\x1b[90m$ {shown}\x1b[0m\r\n"));
 
-        let outcome = run_command(&self.root, &a.command, Duration::from_millis(timeout), |chunk| {
+        let outcome = run_command(&self.root, &a.command, Duration::from_millis(timeout), &stop, |chunk| {
             self.rt.events.shell(&self.rt.id, None, &to_terminal(chunk));
         })
         .await;
 
         let (result, text) = match outcome {
+            Ok(Ran { stopped: true, .. }) => {
+                self.update_log(&entry, "RUN", &a.command, "stopped", false);
+                self.rt.events.files_changed();
+                return fail("Stopped.");
+            }
             Ok(Ran { output, code: Some(0), .. }) => ("exit 0".to_string(), clip(&strip_ansi(&output))),
-            Ok(Ran { output, code, timed_out }) => {
+            Ok(Ran { output, code, timed_out, .. }) => {
                 let tail = if timed_out {
                     format!("\nCommand timed out after {} seconds", timeout / 1000)
                 } else {
@@ -309,12 +328,12 @@ impl BlixelTools {
 
     fn log(&self, verb: &str, target: &str, result: &str, live: bool, refused: bool) -> String {
         let entry_id = new_id("e");
-        self.rt.events.activity(Activity { agent_id: &self.rt.id, entry_id: &entry_id, verb, target, result, live, refused });
+        self.rt.events.activity(Activity { agent_id: &self.rt.id, entry_id: &entry_id, verb, target, result, live, refused, detail: None });
         entry_id
     }
 
     fn update_log(&self, entry_id: &str, verb: &str, target: &str, result: &str, live: bool) {
-        self.rt.events.activity(Activity { agent_id: &self.rt.id, entry_id, verb, target, result, live, refused: false });
+        self.rt.events.activity(Activity { agent_id: &self.rt.id, entry_id, verb, target, result, live, refused: false, detail: None });
     }
 }
 
@@ -328,20 +347,28 @@ impl ServerHandler for BlixelTools {
     }
 }
 
-/// Serves the tools on 127.0.0.1 at a free port. Requests must carry `Bearer <token>`.
-pub async fn serve(tools: BlixelTools, token: String, cancel: CancellationToken) -> std::io::Result<SocketAddr> {
+/// Serves the tools on 127.0.0.1 at a free port, with `extra` routes beside
+/// them (the agent's connectors). Requests must carry `Bearer <token>` and,
+/// on Linux, come from a process of the same user: the token is visible to
+/// other local users in the adapter's command line.
+pub async fn serve(tools: BlixelTools, extra: axum::Router, token: String, cancel: CancellationToken) -> std::io::Result<SocketAddr> {
+    // Commands stop with the server.
+    let tools = BlixelTools { stop: cancel.clone(), ..tools };
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default().with_cancellation_token(cancel.child_token()),
     );
     let expected = Arc::new(format!("Bearer {token}"));
-    let router = axum::Router::new().nest_service("/mcp", service).layer(axum::middleware::from_fn(
+    let router = axum::Router::new().nest_service("/mcp", service).merge(extra).layer(axum::middleware::from_fn(
         move |req: Request, next: Next| {
             let expected = expected.clone();
             async move {
+                let same_user = req.extensions().get::<ConnectInfo<peer::Peer>>().is_some_and(|c| c.0.same_user);
                 let given = req.headers().get(AUTHORIZATION).and_then(|v| v.to_str().ok());
-                if given == Some(expected.as_str()) {
+                if !same_user {
+                    StatusCode::FORBIDDEN.into_response()
+                } else if given == Some(expected.as_str()) {
                     next.run(req).await
                 } else {
                     StatusCode::UNAUTHORIZED.into_response()
@@ -353,11 +380,116 @@ pub async fn serve(tools: BlixelTools, token: String, cancel: CancellationToken)
     let addr = listener.local_addr()?;
     tokio::spawn(async move {
         let shutdown = cancel.cancelled_owned();
-        if let Err(e) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+        let app = router.into_make_service_with_connect_info::<peer::Peer>();
+        if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
             eprintln!("blixel: tool server stopped: {e}");
         }
     });
     Ok(addr)
+}
+
+/// Who is on the other end of a connection to the tool server.
+mod peer {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    use axum::extract::connect_info::Connected;
+    use axum::serve::IncomingStream;
+    use tokio::net::TcpListener;
+
+    /// Worked out once per connection, when it is accepted.
+    #[derive(Clone, Debug)]
+    pub struct Peer {
+        pub same_user: bool,
+    }
+
+    impl Connected<IncomingStream<'_, TcpListener>> for Peer {
+        fn connect_info(stream: IncomingStream<'_, TcpListener>) -> Self {
+            let remote = *stream.remote_addr();
+            let same_user = stream.io().local_addr().is_ok_and(|local| same_user(remote, local));
+            Peer { same_user }
+        }
+    }
+
+    /// Whether the socket at `remote` (connected to our `local`) belongs to
+    /// this process's user: the kernel's socket table names each socket's owner.
+    #[cfg(target_os = "linux")]
+    pub fn same_user(remote: SocketAddr, local: SocketAddr) -> bool {
+        let table = if remote.is_ipv4() { "/proc/net/tcp" } else { "/proc/net/tcp6" };
+        let me = unsafe { libc::getuid() };
+        std::fs::read_to_string(table).ok().and_then(|t| owner(&t, remote, local)) == Some(me)
+    }
+
+    /// Elsewhere only the token protects the server.
+    #[cfg(not(target_os = "linux"))]
+    pub fn same_user(_remote: SocketAddr, _local: SocketAddr) -> bool {
+        true
+    }
+
+    /// The uid of the socket whose own address is `local` and whose other end
+    /// is `remote`, from the text of /proc/net/tcp or tcp6.
+    pub fn owner(table: &str, local: SocketAddr, remote: SocketAddr) -> Option<u32> {
+        table.lines().skip(1).find_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let matches = fields.len() > 7 && parse(fields[1]) == Some(local) && parse(fields[2]) == Some(remote);
+            if matches {
+                fields[7].parse().ok()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// "0100007F:1F90" is 127.0.0.1:8080: each 32-bit word of the address is
+    /// printed as a number in the machine's byte order, the port in hex.
+    fn parse(text: &str) -> Option<SocketAddr> {
+        let (ip, port) = text.split_once(':')?;
+        let port = u16::from_str_radix(port, 16).ok()?;
+        let mut bytes = Vec::with_capacity(16);
+        for i in (0..ip.len()).step_by(8) {
+            bytes.extend(u32::from_str_radix(ip.get(i..i + 8)?, 16).ok()?.to_ne_bytes());
+        }
+        let ip = match bytes.len() {
+            4 => IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(bytes).ok()?)),
+            16 => IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(bytes).ok()?)),
+            _ => return None,
+        };
+        Some(SocketAddr::new(ip, port))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_socket_table_names_each_sockets_owner() {
+            let w = |b: [u8; 4]| format!("{:08X}", u32::from_ne_bytes(b));
+            let lo = w([127, 0, 0, 1]);
+            let table = format!(
+                "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   \
+                 0: {lo}:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1 1\n   \
+                 1: {lo}:C350 {lo}:1F90 01 00000000:00000000 00:00000000 00000000  1001        0 2 1\n   \
+                 2: {lo}:1F90 {lo}:C350 01 00000000:00000000 00:00000000 00000000  1000        0 3 1\n"
+            );
+            let server: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+            let client: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+            assert_eq!(owner(&table, client, server), Some(1001), "the client's own socket, not ours");
+            assert_eq!(owner(&table, "127.0.0.1:50001".parse().unwrap(), server), None);
+            let v6 = format!("{}{}{}{}:0050", w([0, 0, 0, 0]), w([0, 0, 0, 0]), w([0, 0, 0, 0]), w([0, 0, 0, 1]));
+            assert_eq!(parse(&v6), Some("[::1]:80".parse().unwrap()));
+        }
+
+        /// The real table finds a real connection's owner: this test's user.
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn a_connection_from_this_user_is_recognised() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (accepted, remote) = listener.accept().unwrap();
+            assert_eq!(remote, client.local_addr().unwrap());
+            assert!(same_user(remote, accepted.local_addr().unwrap()));
+            assert!(!same_user("127.0.0.1:1".parse().unwrap(), accepted.local_addr().unwrap()), "unknown sockets are refused");
+        }
+    }
 }
 
 fn write_file(full: &Path, content: &str) -> std::io::Result<()> {
@@ -409,6 +541,8 @@ struct Ran {
     output: String,
     code: Option<i32>,
     timed_out: bool,
+    /// Stopped by one of its stop tokens, and killed with everything it started.
+    stopped: bool,
 }
 
 /// A command's output as kept for the model: its start and its end, so a
@@ -455,20 +589,73 @@ impl Kept {
 /// Shell output reaches the interface at most this often, in batches.
 const SHELL_BATCH: Duration = Duration::from_millis(50);
 
-/// Runs `bash -c command` in `cwd` with no input, streaming output to `on_output` in batches.
-async fn run_command(cwd: &Path, command: &str, timeout: Duration, mut on_output: impl FnMut(&str)) -> std::io::Result<Ran> {
+/// Variables for what Blixel itself holds, which commands do not inherit:
+/// Anthropic credentials, and the session bus, the way to the keychain where
+/// Blixel keeps API keys and connector secrets. A speed bump, not a
+/// guarantee: a command runs as the user and can still find the bus at its
+/// usual path, or reach the keychain some other way. Keeping secrets from an
+/// agent with Run needs a sandbox for its commands (future work).
+const HELD_VARS: [&str; 4] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "DBUS_SESSION_BUS_ADDRESS"];
+
+/// `bash -c command` in `cwd`, with no input and in a process group of its own.
+fn command_for(cwd: &Path, command: &str) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg("-c")
-        .arg(command)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env_remove("ANTHROPIC_API_KEY")
-        .kill_on_drop(true);
+    cmd.arg("-c").arg(command).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    for name in HELD_VARS {
+        cmd.env_remove(name);
+    }
     #[cfg(unix)]
     cmd.process_group(0);
-    let mut child = cmd.spawn()?;
+    cmd
+}
+
+/// A command's process group, killed when this is dropped unless disarmed:
+/// should the call be dropped mid-command, nothing it started keeps running
+/// (`kill_on_drop` alone stops only bash).
+struct Group(Option<u32>);
+
+impl Group {
+    /// After the command was waited for: its id may be given to a new process.
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.0 {
+            // Not yet waited for, so the group id is still the command's.
+            unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
+        }
+    }
+}
+
+/// Resolves once any of the tokens is cancelled (never, for none).
+async fn any_cancelled(tokens: &[CancellationToken]) {
+    let mut waits: Vec<_> = tokens.iter().map(|t| Box::pin(t.cancelled())).collect();
+    std::future::poll_fn(|cx| {
+        if waits.iter_mut().any(|w| std::future::Future::poll(w.as_mut(), cx).is_ready()) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await
+}
+
+/// Runs `bash -c command` in `cwd` with no input, streaming output to
+/// `on_output` in batches, until it ends, times out or any `stop` token is
+/// cancelled. Timing out or stopping kills its whole process group.
+async fn run_command(
+    cwd: &Path,
+    command: &str,
+    timeout: Duration,
+    stop: &[CancellationToken],
+    mut on_output: impl FnMut(&str),
+) -> std::io::Result<Ran> {
+    let mut child = command_for(cwd, command).spawn()?;
+    let mut group = Group(child.id());
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let (mut out_buf, mut err_buf) = ([0u8; 4096], [0u8; 4096]);
@@ -479,7 +666,9 @@ async fn run_command(cwd: &Path, command: &str, timeout: Duration, mut on_output
     flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
-    let mut timed_out = false;
+    let stopping = any_cancelled(stop);
+    tokio::pin!(stopping);
+    let (mut timed_out, mut stopped) = (false, false);
 
     while out_open || err_open {
         let read = tokio::select! {
@@ -497,6 +686,7 @@ async fn run_command(cwd: &Path, command: &str, timeout: Duration, mut on_output
                 None
             }
             _ = &mut deadline => { timed_out = true; break; }
+            _ = &mut stopping => { stopped = true; break; }
         };
         if let Some(text) = read {
             kept.push(&text);
@@ -506,19 +696,28 @@ async fn run_command(cwd: &Path, command: &str, timeout: Duration, mut on_output
     if !batch.is_empty() {
         on_output(&batch);
     }
-    if timed_out {
+    if timed_out || stopped {
         kill_group(&mut child).await;
-        on_output("\n[timed out]\n");
+        on_output(if stopped { "\n[stopped]\n" } else { "\n[timed out]\n" });
     }
-    let status = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    // Its output closed, but it may still run: wait a little, unless it is stopped meanwhile.
+    let status = tokio::select! {
+        s = tokio::time::timeout(Duration::from_secs(5), child.wait()) => s.ok().and_then(Result::ok),
+        _ = &mut stopping, if !stopped => {
+            stopped = true;
+            on_output("\n[stopped]\n");
+            None
+        }
+    };
     let code = match status {
-        Ok(Ok(s)) => s.code(),
-        _ => {
+        Some(s) => s.code(),
+        None => {
             kill_group(&mut child).await;
             None
         }
     };
-    Ok(Ran { output: kept.finish(), code, timed_out })
+    group.disarm();
+    Ok(Ran { output: kept.finish(), code, timed_out, stopped })
 }
 
 async fn kill_group(child: &mut tokio::process::Child) {
@@ -653,12 +852,13 @@ mod tests {
             },
             edit_paths: "docs/**".into(),
             rule_packs: vec![RulePack { label: "Locked docs".into(), edit_area: "!docs/locked/**".into(), ..Default::default() }],
+            connectors: Default::default(),
             model: "test".into(),
             effort: "medium".into(),
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
         let cancel = CancellationToken::new();
-        let addr = serve(BlixelTools::new(rt, root.clone()), "secret".into(), cancel.clone()).await.unwrap();
+        let addr = serve(BlixelTools::new(rt, root.clone()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
         let url = format!("http://{addr}/mcp");
 
         let wrong = StreamableHttpClientTransport::from_config(
@@ -746,6 +946,7 @@ mod tests {
             },
             edit_paths: String::new(),
             rule_packs: vec![RulePack { label: "Schema".into(), protect: vec!["db/".into()], ..Default::default() }],
+            connectors: Default::default(),
             model: "test".into(),
             effort: "medium".into(),
         };
@@ -763,20 +964,205 @@ mod tests {
     #[tokio::test]
     async fn commands_run_without_input_and_time_out() {
         let dir = std::env::temp_dir();
-        let ran = run_command(&dir, "echo hi; echo err >&2; exit 3", Duration::from_secs(5), |_| {}).await.unwrap();
+        let ran = run_command(&dir, "echo hi; echo err >&2; exit 3", Duration::from_secs(5), &[], |_| {}).await.unwrap();
         assert!(ran.output.contains("hi") && ran.output.contains("err"));
         assert_eq!(ran.code, Some(3));
-        let read = run_command(&dir, "read x; echo got:$x", Duration::from_secs(5), |_| {}).await.unwrap();
+        let read = run_command(&dir, "read x; echo got:$x", Duration::from_secs(5), &[], |_| {}).await.unwrap();
         assert!(read.output.contains("got:"), "stdin is empty, so read returns at once");
-        let slow = run_command(&dir, "sleep 30", Duration::from_millis(300), |_| {}).await.unwrap();
+        let slow = run_command(&dir, "sleep 30", Duration::from_millis(300), &[], |_| {}).await.unwrap();
         assert!(slow.timed_out);
+    }
+
+    /// Whether a process has ended (gone, or only waiting to be reaped).
+    #[cfg(target_os = "linux")]
+    fn ended(pid: &str) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => true,
+            Ok(stat) => stat.rsplit_once(") ").is_some_and(|(_, rest)| rest.starts_with('Z')),
+        }
+    }
+
+    /// Waits for a command to write the id of a process it started.
+    async fn started(pidfile: &Path) -> String {
+        for _ in 0..100 {
+            if let Ok(pid) = std::fs::read_to_string(pidfile) {
+                if !pid.trim().is_empty() {
+                    return pid.trim().to_string();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the command never started its child");
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn assert_ended(pid: &str) {
+        for _ in 0..40 {
+            if ended(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("process {pid}, started by the command, still runs");
+    }
+
+    /// A command started in the background plus one in the foreground, both long.
+    fn sleeper(pidfile: &Path) -> String {
+        format!("sleep 300 & echo $! > '{}'; sleep 300", pidfile.display())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_stopped_command_is_killed_with_what_it_started() {
+        let dir = std::env::temp_dir().join(format!("blixel-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("child.pid");
+        let stop = CancellationToken::new();
+        let shown = Arc::new(std::sync::Mutex::new(String::new()));
+        let run = tokio::spawn({
+            let (dir, command, stop, shown) = (dir.clone(), sleeper(&pidfile), stop.clone(), shown.clone());
+            async move {
+                run_command(&dir, &command, Duration::from_secs(60), &[CancellationToken::new(), stop], |s| {
+                    shown.lock().unwrap().push_str(s)
+                })
+                .await
+            }
+        });
+        let pid = started(&pidfile).await;
+        stop.cancel();
+        let ran = tokio::time::timeout(Duration::from_secs(5), run).await.expect("stops at once").unwrap().unwrap();
+        assert!(ran.stopped && !ran.timed_out);
+        assert!(shown.lock().unwrap().contains("[stopped]"), "the shell says so");
+        assert_ended(&pid).await;
+
+        // Already stopped: it is killed as soon as it starts.
+        let ran = run_command(&dir, "sleep 300", Duration::from_secs(60), &[stop], |_| {}).await.unwrap();
+        assert!(ran.stopped);
+    }
+
+    /// Each way a call can be stopped reaches the command: the agent's program
+    /// cancelling it (over MCP), the user's Stop, and the tool server stopping.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn every_stop_reaches_a_running_command() {
+        use crate::agents::permissions::Broker;
+        use crate::agents::settings::{AgentConfig, Permissions};
+        use crate::events::Events;
+        use rmcp::model::{CallToolRequest, CallToolRequestParams, ClientRequest};
+        use rmcp::service::PeerRequestOptions;
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+        use rmcp::transport::StreamableHttpClientTransport;
+        use rmcp::ServiceExt;
+
+        let dir = std::env::temp_dir().join(format!("blixel-stops-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.canonicalize().unwrap();
+        let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let events = Events::to_sink({
+            let seen = seen.clone();
+            move |name, payload| seen.lock().unwrap().push(format!("{name} {payload}"))
+        });
+        let config = AgentConfig {
+            id: "t".into(),
+            name: "Tester".into(),
+            instructions: String::new(),
+            read_notes: false,
+            permissions: Permissions {
+                read: Setting::Allow,
+                edit: Setting::Allow,
+                run: Setting::Allow,
+                commit: Setting::Off,
+                push: Setting::Off,
+            },
+            edit_paths: String::new(),
+            rule_packs: vec![],
+            connectors: Default::default(),
+            model: "test".into(),
+            effort: "medium".into(),
+        };
+        let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
+        let args = |pidfile: &Path| BashArgs { command: sleeper(pidfile), timeout: None, description: None, run_in_background: false };
+        let text = |r: &CallToolResult| format!("{:?}", r.content);
+
+        // The user's Stop, through the agent's runtime.
+        let server = CancellationToken::new();
+        let tools = BlixelTools { stop: server.clone(), ..BlixelTools::new(rt.clone(), root.clone()) };
+        let pidfile = root.join("stop.pid");
+        let call = tokio::spawn({
+            let (tools, a) = (tools.clone(), args(&pidfile));
+            async move { tools.bash(Parameters(a), CancellationToken::new()).await.unwrap() }
+        });
+        let pid = started(&pidfile).await;
+        rt.stop_commands();
+        let r = tokio::time::timeout(Duration::from_secs(5), call).await.expect("stops at once").unwrap();
+        assert!(r.is_error == Some(true) && text(&r).contains("Stopped."), "{r:?}");
+        assert_ended(&pid).await;
+
+        // A later command runs normally.
+        let after = BashArgs { command: "echo after".into(), timeout: None, description: None, run_in_background: false };
+        let r = tools.bash(Parameters(after), CancellationToken::new()).await.unwrap();
+        assert!(r.is_error != Some(true) && text(&r).contains("after"), "{r:?}");
+
+        // The session ending stops the tool server.
+        let pidfile = root.join("server.pid");
+        let call = tokio::spawn({
+            let (tools, a) = (tools.clone(), args(&pidfile));
+            async move { tools.bash(Parameters(a), CancellationToken::new()).await.unwrap() }
+        });
+        let pid = started(&pidfile).await;
+        server.cancel();
+        let r = tokio::time::timeout(Duration::from_secs(5), call).await.expect("stops at once").unwrap();
+        assert!(text(&r).contains("Stopped."), "{r:?}");
+        assert_ended(&pid).await;
+
+        // The agent's program cancels the call over MCP: rmcp hands the tool that cancel.
+        let cancel = CancellationToken::new();
+        let addr = serve(BlixelTools::new(rt.clone(), root.clone()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
+        let client = ().serve(StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/mcp")).auth_header("secret"),
+        ))
+        .await
+        .unwrap();
+        let pidfile = root.join("mcp.pid");
+        let params = CallToolRequestParams::new("bash")
+            .with_arguments(serde_json::json!({ "command": sleeper(&pidfile) }).as_object().unwrap().clone());
+        let handle = client
+            .peer()
+            .send_cancellable_request(ClientRequest::CallToolRequest(CallToolRequest::new(params)), PeerRequestOptions::no_options())
+            .await
+            .unwrap();
+        let pid = started(&pidfile).await;
+        handle.cancel(Some("the user pressed Stop".into())).await.unwrap();
+        assert_ended(&pid).await;
+        cancel.cancel();
+
+        let log = seen.lock().unwrap().join("\n");
+        assert!(log.contains("\"result\":\"stopped\""), "{log}");
+        assert!(log.contains("[stopped]"), "{log}");
+    }
+
+    #[test]
+    fn commands_do_not_inherit_what_blixel_holds() {
+        let cmd = command_for(&std::env::temp_dir(), "env");
+        let removed: Vec<String> = cmd
+            .as_std()
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        for name in ["DBUS_SESSION_BUS_ADDRESS", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+            assert!(removed.iter().any(|r| r == name), "{name} is passed on: {removed:?}");
+        }
+        assert!(!removed.iter().any(|r| r == "PATH" || r == "HOME" || r == "SSH_AUTH_SOCK"), "the user's own environment stays");
     }
 
     #[tokio::test]
     async fn long_output_is_kept_bounded() {
         let dir = std::env::temp_dir();
         let mut shown = 0;
-        let ran = run_command(&dir, "head -c 3000000 /dev/zero | tr '\\0' x; echo; echo end", Duration::from_secs(20), |s| {
+        let ran = run_command(&dir, "head -c 3000000 /dev/zero | tr '\\0' x; echo; echo end", Duration::from_secs(20), &[], |s| {
             shown += s.len()
         })
         .await

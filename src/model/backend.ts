@@ -46,22 +46,28 @@ export function demoBackend(): Backend {
   };
 }
 
-export async function folderBackend(root: string): Promise<Backend> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  const info = await invoke<{ root: string; name: string }>("open_workspace", { path: root });
+/**
+ * The open project's folder, through the core. The core's project_open has
+ * already made it the workspace; every path is confined to it there.
+ */
+export function folderBackend(name: string): Backend {
+  const call = async <T>(cmd: string, args?: Record<string, unknown>) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<T>(cmd, args);
+  };
   return {
     kind: "folder",
-    name: info.name,
-    list: () => invoke<TreeEntry[]>("list_tree"),
-    read: (path) => invoke<string>("read_file", { path }),
-    write: (path, content, expected) => invoke<boolean>("write_file", { path, content, expected: expected ?? null }),
+    name,
+    list: () => call<TreeEntry[]>("list_tree"),
+    read: (path) => call<string>("read_file", { path }),
+    write: (path, content, expected) => call<boolean>("write_file", { path, content, expected: expected ?? null }),
   };
 }
 
 /** Asks the user for a folder. Null when cancelled or outside the desktop app. */
-export async function pickFolder(): Promise<string | null> {
+export async function pickFolder(title = "Open a project folder"): Promise<string | null> {
   if (!inTauri) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
-  const picked = await open({ directory: true, multiple: false, title: "Open a project folder" });
+  const picked = await open({ directory: true, multiple: false, title });
   return typeof picked === "string" ? picked : null;
 }

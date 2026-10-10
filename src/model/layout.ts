@@ -27,16 +27,16 @@ const MOD_HEAD = 40;
  * the view shows under its head, so the shell's height is its terminal's, as
  * it always was, and a mod's is its page's.
  */
-export const headHeight = (view: ViewId) => (view === "shell" ? 32 : view.startsWith("mod:") ? MOD_HEAD : 0);
+export const headHeight = (view: ViewId) => (view === "shell" || view === "tasks" ? 32 : view.startsWith("mod:") ? MOD_HEAD : 0);
 
 /** Widths a view gets in a column of its own, and heights when stacked under other views. */
-const WIDTHS: Partial<Record<ViewId, number>> = { chat: 440, editor: 560, shell: 420 };
-const HEIGHTS: Partial<Record<ViewId, number>> = { chat: 360, editor: 360, shell: 150 };
+const WIDTHS: Partial<Record<ViewId, number>> = { chat: 440, editor: 560, shell: 420, tasks: 380 };
+const HEIGHTS: Partial<Record<ViewId, number>> = { chat: 360, editor: 360, shell: 150, tasks: 220 };
 
 const KEY = "blixel.layout";
 const DEFAULT_NAV: NavState = { side: "left", width: NAV.initial, collapsed: false };
 
-const CORE_VIEWS = new Set<string>(["chat", "editor", "shell"]);
+const CORE_VIEWS = new Set<string>(["chat", "editor", "shell", "tasks"]);
 const isViewId = (v: unknown): v is ViewId =>
   typeof v === "string" && (CORE_VIEWS.has(v) || /^mod:[^:\s]+:[^:\s]+$/.test(v));
 
@@ -142,6 +142,7 @@ function place(s: LayoutState, view: ViewId) {
     s.columns.splice(chat ? chat.index + 1 : s.columns.length, 0, column("fill"));
     for (const c of s.columns) if (c.width === "fill" && c.slots[0].view !== "editor") c.width = defaultWidth(c.slots[0].view);
   } else if (view === "shell" && editor) editor.column.slots.push({ view, open: true, height: defaultHeight(view) });
+  else if (view === "tasks" && find(s, "chat")) find(s, "chat")!.column.slots.push({ view, open: true, height: defaultHeight(view) });
   else s.columns.push(column(defaultWidth(view)));
 }
 

@@ -1,21 +1,26 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "../avatars/Avatar";
 import { answerPermission, sendToAgent } from "../model/mock-agent";
 import { answerRealPermission, cancelTurn, sendToRealAgent } from "../model/real-agent";
+import { connectorName } from "../connectors/store";
 import { ViewMenuButton } from "../layout/ViewMenu";
 import { isOpen, setChatOpen, setEditorOpen, toggleShell, useLayout } from "../model/layout";
 import { agentById, hueOf, notify, setComposerMode, setDraft, showView, useStore } from "../model/store";
 import type { ActivityEntry, Agent, ChatItem } from "../model/types";
+import { visibleText } from "../model/visible-text";
 import { agentColor } from "../theme/theme";
 import { Segmented } from "./controls";
-import { ChevronDown, CloseIcon, CodeIcon, PlusIcon, SendIcon, StopIcon, TerminalIcon } from "./icons";
+import { ChevronDown, ChevronRight, CloseIcon, CodeIcon, PlusIcon, SendIcon, StopIcon, TerminalIcon, WarnIcon } from "./icons";
 import { agentSubline, avatarMode } from "./Sidebar";
+import { TasksButton } from "./TasksPanel";
+import "./chat.css";
 
 const NO_ITEMS: ChatItem[] = [];
 
 export function ChatPanel() {
   const editorOpen = useLayout((l) => isOpen(l, "editor"));
   const agent = useStore((s) => s.agents.find((a) => a.id === s.selectedId));
+  const unreviewed = useStore((s) => Boolean(s.selectedId && s.agentTrust[s.selectedId]));
   const items = useStore((s) => (s.selectedId ? s.chats[s.selectedId] : undefined) ?? NO_ITEMS);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -27,6 +32,16 @@ export function ChatPanel() {
   }, [items]);
   useEffect(() => {
     pinned.current = true;
+  }, [agent?.id]);
+  // When the chat gets shorter (a view opened under it), the newest message stays in view.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const keep = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    keep.observe(el);
+    return () => keep.disconnect();
   }, [agent?.id]);
 
   const tools = (
@@ -73,6 +88,8 @@ export function ChatPanel() {
         {tools}
       </div>
 
+      {unreviewed && <ReviewCard agent={agent} />}
+
       <div
         ref={scroller}
         className="chat-scroll"
@@ -89,6 +106,24 @@ export function ChatPanel() {
 
       <Composer agent={agent} />
     </section>
+  );
+}
+
+/**
+ * Above the chat while the agent's saved settings were changed outside the
+ * app: the core won't run it until the user saves them from its form.
+ */
+function ReviewCard({ agent }: { agent: Agent }) {
+  return (
+    <div className="review-card" role="status">
+      <WarnIcon size={15} />
+      <span className="grow min0">
+        {agent.name}'s saved settings were changed outside the app. Review them before it runs.
+      </span>
+      <button type="button" className="btn" onClick={() => showView({ kind: "agent-form", editingId: agent.id })}>
+        Review
+      </button>
+    </div>
   );
 }
 
@@ -166,16 +201,35 @@ function Activity({ entries, agent }: { entries: ActivityEntry[]; agent: Agent }
   return (
     <div className="activity">
       {entries.map((e) => (
-        <div key={e.id} className={"activity-row" + (e.refused ? " refused" : "")}>
-          <span className="activity-dot" />
-          <span className="activity-verb">{e.verb}</span>
-          <span className="grow min0 ellipsis">{e.target}</span>
-          <span className={e.live ? "pulse" : "muted"} style={e.live ? { color } : undefined}>
-            {e.result}
-          </span>
-        </div>
+        <ActivityRow key={e.id} entry={e} color={color} />
       ))}
     </div>
+  );
+}
+
+/** One line of the log; one with more to it (a connector call's arguments) folds open. */
+function ActivityRow({ entry: e, color }: { entry: ActivityEntry; color: string }) {
+  const [open, setOpen] = useState(false);
+  const target = e.detail ? (
+    <button type="button" className="activity-fold grow min0" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span className="ellipsis">{visibleText(e.target)}</span>
+      {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+    </button>
+  ) : (
+    <span className="grow min0 ellipsis">{visibleText(e.target)}</span>
+  );
+  return (
+    <>
+      <div className={"activity-row" + (e.refused ? " refused" : "")}>
+        <span className="activity-dot" />
+        <span className="activity-verb">{e.verb}</span>
+        {target}
+        <span className={e.live ? "pulse" : "muted"} style={e.live ? { color } : undefined}>
+          {e.result}
+        </span>
+      </div>
+      {open && e.detail && <pre className="activity-detail">{visibleText(e.detail)}</pre>}
+    </>
   );
 }
 
@@ -187,11 +241,12 @@ function answer(item: Extract<ChatItem, { kind: "permission" }>, value: keyof ty
 }
 
 function PermissionRequest({ item }: { item: Extract<ChatItem, { kind: "permission" }> }) {
-  const open = item.state === "open";
+  const open = item.state === "open" && !item.closed;
   return (
     <div className={"bubble card" + (open ? " asking" : "")}>
-      <div className="perm-title">{item.title}</div>
-      <div className="perm-detail">{item.detail}</div>
+      {/* Shown in full and wrapped, without hidden characters, so nothing in the request is out of sight. */}
+      <div className="perm-title">{visibleText(item.title)}</div>
+      <div className="perm-detail">{visibleText(item.detail)}</div>
       {open ? (
         <div className="perm-actions">
           <button type="button" className="btn primary" onClick={() => answer(item, "allowed")}>
@@ -201,7 +256,11 @@ function PermissionRequest({ item }: { item: Extract<ChatItem, { kind: "permissi
             <button
               type="button"
               className="btn"
-              title="Sets this tool to Allow for this agent"
+              title={
+                item.tool.startsWith("connector:")
+                  ? `Sets ${connectorName(item.tool.slice("connector:".length))} to Allow for this agent`
+                  : "Sets this tool to Allow for this agent"
+              }
               onClick={() => answer(item, "always")}
             >
               Always allow
@@ -212,7 +271,7 @@ function PermissionRequest({ item }: { item: Extract<ChatItem, { kind: "permissi
           </button>
         </div>
       ) : (
-        <div className="muted small top6">{ANSWERS[item.state as keyof typeof ANSWERS]}</div>
+        <div className="muted small top6">{item.closed === "quit" ? "Closed when the app quit" : ANSWERS[item.state as keyof typeof ANSWERS]}</div>
       )}
     </div>
   );
@@ -262,6 +321,7 @@ function Composer({ agent }: { agent: Agent }) {
         >
           <TerminalIcon size={16} color="currentColor" />
         </button>
+        <TasksButton agent={agent} />
         <span className="grow" />
         <Segmented
           label="Send as"

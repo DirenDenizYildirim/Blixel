@@ -145,3 +145,13 @@
   .form-preview.settings-aside { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
   .aside-block { flex: 1 1 260px; max-width: 400px; }
 }
+
+/* The editor's settings: a small live editor, and the font size slider in a row. */
+.editor-preview {
+  max-height: 260px; margin: 6px 0 2px; overflow: hidden;
+  background: var(--code); border: 1px solid var(--line); border-radius: 10px;
+}
+.settings-page .editor-preview .cm-editor { max-height: 258px; }
+.settings-page .editor-preview .cm-scroller { padding: 8px 0; }
+.range.settings-range { flex: 0 1 240px; min-width: 140px; height: 30px; }
+.settings-model { max-width: 320px; }

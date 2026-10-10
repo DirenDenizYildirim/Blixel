@@ -225,3 +225,68 @@ layouts, and the mods in the sidebar"); design by Claude.
   or a building block) in a colour from its id. Not chosen: image files
   (they would have to be served for mods that are off), generated
   identicons (they say nothing about the mod).
+
+## 9. Projects, saving, tasks, connectors (2026-10-10)
+
+At the owner's request; decided by Claude with a planning agent and a
+research agent.
+
+- **Saving:** one SQLite database in the app's data folder, never in a
+  project folder (an agent with Edit could otherwise change its own
+  settings). The core writes projects, agents and connectors itself, each
+  agent and connector record with a keyed check: a record changed outside
+  the app loads with every Allow lowered to Ask until the user reviews it
+  (an agent with Run could otherwise raise its own permissions). Chats and
+  tasks are stored one item per row, so a streaming reply rewrites one row.
+  Theme and layout stay in the web view's storage (they are needed before
+  the first paint). Not chosen: files in the project (`.blixel/`), plain
+  JSON files, the interface writing permissions.
+- **Projects:** a folder with its own agents, chats and tasks; one open at a
+  time; the demo is never saved. A new project can bring agents (their
+  settings are copied, not their chats) and files (copied in, never
+  overwriting). Agents stay per project. Not chosen: agents shared across
+  projects (an edit area like `docs/**` means something else in each
+  folder).
+- **Sidebar:** a project switcher; "New" opens a small pop-up (Project and
+  Task); agent rows get a menu (Edit, Duplicate, Copy to project, Remove);
+  Mods, Connectors, Theme and Settings move to an icon row at the bottom;
+  Tasks and Terminal leave the sidebar.
+- **Tasks:** a panel that follows the selected agent, like its shell, with
+  "+" for a task for anyone. Sending as a Task makes one. An agent's "done"
+  is a claim: the task waits for the user to check it. Not chosen: a task
+  board page (later), tasks only inside the chat.
+- **Connectors:** MCP servers added once, used by agents per their own
+  setting (Off, Ask or Allow per agent). Blixel is the gateway: the core
+  runs each connector's client and offers its tools to an agent through the
+  agent's own tool server, so the app checks every call, logs it, keeps
+  secrets in the keychain away from the agent, shows each connector's state,
+  and asks again when a connector's tools change. Not chosen: handing the
+  servers to Claude Code directly (checks, logs, secrets and status would
+  depend on the adapter, which skips servers that need sign-in and passes
+  their headers on its command line). Templates: GitHub, Linear, Sentry,
+  Context7, Postgres (DBHub), Playwright, and custom. Mods cannot add
+  connectors. Sign-in with OAuth comes later; tokens work now.
+- **Settings:** an Editor section (font size, tabs, wrapping, line numbers,
+  active line, ligatures, agents' edits typed or shown at once) and
+  defaults for new agents.
+- **What the keyed check can and can't do (security review, 2026-10-10):**
+  it catches records changed by an agent's file edits or by anything outside
+  the app. It does not stop an agent allowed to run commands: commands run
+  as the user, and on Linux the keychain lets any program of the user read
+  the check key and connector tokens. Run therefore means "can do what you
+  can do"; the real fix is a sandbox for agent commands (bubblewrap or
+  Landlock, with no access to the keychain or the app's data), planned
+  next. Until then: a record that fails the check keeps its agent from
+  running until the user reviews and saves it, and only that explicit save
+  trusts it again. A project whose record fails the check does not open
+  until the user confirms its folder with "Locate…" (otherwise trusted
+  agents could be sent to work in another folder); a tampered connector is
+  not given to agents until the user saves it again.
+- **Other review fixes:** symbolic links can no longer lead an edit outside
+  the project or past the edit area and protected paths (checks use the
+  real path); Stop, a project switch or the end of a session now kill an
+  agent's running command and everything it started; one oversized chat
+  entry can no longer block saving; a broken database is moved aside so the
+  app still starts; permission requests are cleaned of hidden characters and
+  wrap instead of hiding text; a connector's error output never reaches the
+  agent; connector tool schemas are cleaned in full and shown for approval.

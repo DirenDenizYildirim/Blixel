@@ -103,3 +103,23 @@ export const StopIcon = ({ size = 14, color = "currentColor" }: IconProps) => (
     <rect x="6" y="6" width="12" height="12" rx="2" fill={color} />
   </svg>
 );
+
+/** A plug, for the connectors. */
+export const ConnectorsIcon = ({ size = 15, color = ACCENT, width = 2.2 }: IconProps) =>
+  svg(size, color, width, <path d="M9 3.5V7M15 3.5V7M6.5 7h11v3.5a5.5 5.5 0 01-11 0zM12 16v4.5" />, true);
+
+/** Three dots, for a row's menu. */
+export const MoreIcon = ({ size = 16, color = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: "none" }}>
+    <circle cx="5.5" cy="12" r="1.8" fill={color} />
+    <circle cx="12" cy="12" r="1.8" fill={color} />
+    <circle cx="18.5" cy="12" r="1.8" fill={color} />
+  </svg>
+);
+
+export const CheckIcon = ({ size = 14, color = "currentColor", width = 2.4 }: IconProps) =>
+  svg(size, color, width, <path d="M5 12.5l4.5 4.5L19 7.5" />, true);
+
+/** A triangle with "!", for something the user should look at. */
+export const WarnIcon = ({ size = 13, color = "var(--warn)", width = 2.2 }: IconProps) =>
+  svg(size, color, width, <path d="M12 4L21 19.5H3zM12 10v4M12 17v.01" />, true);

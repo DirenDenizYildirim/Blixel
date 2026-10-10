@@ -1,34 +1,22 @@
-import { useEffect, useRef } from "react";
 import { useThemes } from "../mods/registry";
 import { setTheme, useStore } from "../model/store";
+import { Popover, type Place } from "./NewPopover";
 
-/** The themes of every enabled mod, the built-in ones first. */
-export function ThemeMenu({ onClose }: { onClose: () => void }) {
+/** The themes of every enabled mod, the built-in ones first, in a small pop-up by the Theme button. */
+export function ThemeMenu({ anchor, place, onClose }: { anchor: () => HTMLElement | null; place: Place; onClose: () => void }) {
   const current = useStore((s) => s.theme);
   const themes = useThemes();
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const away = (e: MouseEvent) => {
-      if (!ref.current?.parentElement?.contains(e.target as Node)) onClose();
-    };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", away);
-    window.addEventListener("keydown", esc);
-    return () => {
-      window.removeEventListener("mousedown", away);
-      window.removeEventListener("keydown", esc);
-    };
-  }, [onClose]);
 
   return (
-    <div ref={ref} className="theme-menu" role="menu" aria-label="Theme">
+    <Popover anchor={anchor} label="Theme" place={place} role="menu" className="pop-menu theme-pop" onClose={onClose}>
       {themes.map((t) => (
         <button
           key={t.id}
           type="button"
           role="menuitemradio"
+          className="pop-item"
           aria-checked={t.id === current}
+          data-autofocus={t.id === current || undefined}
           title={t.builtin ? undefined : `From ${t.modName}`}
           onClick={() => setTheme(t.id)}
         >
@@ -39,6 +27,6 @@ export function ThemeMenu({ onClose }: { onClose: () => void }) {
           <span className="ellipsis">{t.label}</span>
         </button>
       ))}
-    </div>
+    </Popover>
   );
 }

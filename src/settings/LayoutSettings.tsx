@@ -22,23 +22,7 @@ import {
 import { showView } from "../model/store";
 import { Keycaps } from "./Keycaps";
 import { LayoutMap, shapeOf, useWindowSize } from "./LayoutMap";
-
-/** A switch for a settings row, whose text sits to its left. */
-function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.checked}
-      aria-label={props.label}
-      disabled={props.disabled}
-      className="switch"
-      onClick={() => props.onChange(!props.checked)}
-    >
-      <span />
-    </button>
-  );
-}
+import { Toggle } from "./Toggle";
 
 const VIEW_HINTS: Record<string, string> = {
   chat: "The selected agent's conversation",

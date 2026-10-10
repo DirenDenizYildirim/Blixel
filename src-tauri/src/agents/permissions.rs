@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use tokio::sync::oneshot;
 
+use crate::connectors::hash::clean_text;
 use crate::events::{new_id, Events, PermissionAsk};
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,13 +41,18 @@ impl Broker {
         detail: &str,
         always_offered: bool,
     ) -> oneshot::Receiver<Answer> {
+        // Titles and details quote what the agent sent (a command, a tool's
+        // title, a path), which could hide text from the user or make it read
+        // differently: shown without hidden characters, titles on one line.
+        let title = one_line(&clean_text(title));
+        let detail = clean_text(detail);
         let request_id = new_id("p");
         let (tx, rx) = oneshot::channel();
         self.pending
             .lock()
             .expect("permission lock")
             .insert(request_id.clone(), Pending { agent_id: agent_id.to_string(), reply: tx });
-        events.permission(PermissionAsk { agent_id, request_id: &request_id, tool, title, detail, always_offered });
+        events.permission(PermissionAsk { agent_id, request_id: &request_id, tool, title: &title, detail: &detail, always_offered });
         rx
     }
 
@@ -73,5 +79,38 @@ impl Broker {
                 events.permission_closed(agent_id, &id, "denied");
             }
         }
+    }
+}
+
+/// Text on one line, its runs of spaces, tabs and line breaks made one space.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn requests_are_shown_without_hidden_characters() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+        let events = Events::to_sink({
+            let seen = seen.clone();
+            move |_, payload| seen.lock().unwrap().push(payload)
+        });
+        let broker = Broker::default();
+        let _reply = broker.open(
+            &events,
+            "a",
+            "run",
+            "Ada is asking to use\n\u{202E}Read\u{200B} notes\t",
+            "rm -rf ./bu\u{200B}ild\u{E0041}\n\tsecond line\u{0007}\r\n",
+            true,
+        );
+        let shown = seen.lock().unwrap()[0].clone();
+        assert_eq!(shown["title"], "Ada is asking to use Read notes");
+        assert_eq!(shown["detail"], "rm -rf ./build\n\tsecond line\n", "lines and tabs stay");
+        assert_eq!(broker.waiting_for("a"), 1);
     }
 }

@@ -33,6 +33,9 @@ pub struct Activity<'a> {
     pub result: &'a str,
     pub live: bool,
     pub refused: bool,
+    /// More about the entry, shown collapsed: e.g. a connector call's arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<&'a str>,
 }
 
 #[derive(Serialize, Clone)]
@@ -120,9 +123,19 @@ impl Events {
         );
     }
 
-    /// The core changed a setting itself, e.g. after "Always allow".
-    pub fn settings(&self, agent_id: &str, permissions: &serde_json::Value) {
-        self.emit("agent://settings", serde_json::json!({ "agentId": agent_id, "permissions": permissions }));
+    /// The core changed a setting itself, e.g. after "Always allow". The
+    /// agent's access to connectors comes along when that is what changed.
+    pub fn settings(&self, agent_id: &str, permissions: &serde_json::Value, connectors: Option<&serde_json::Value>) {
+        let mut payload = serde_json::json!({ "agentId": agent_id, "permissions": permissions });
+        if let Some(connectors) = connectors {
+            payload["connectors"] = connectors.clone();
+        }
+        self.emit("agent://settings", payload);
+    }
+
+    /// A connector's state changed: checked, failed, its tools changed...
+    pub fn connector_state<S: Serialize>(&self, id: &str, state: &S) {
+        self.emit("connector://state", serde_json::json!({ "id": id, "state": state }));
     }
 
     /// The chat bubbles of the user's messages waiting for the current turn to end.

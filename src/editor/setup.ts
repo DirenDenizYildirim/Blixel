@@ -6,16 +6,19 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { rust } from "@codemirror/lang-rust";
-import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
-import { EditorState, type Extension } from "@codemirror/state";
+import { bracketMatching, HighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { Compartment, EditorState, type Extension, type StateEffect } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
+  highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
   lineNumbers,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
+import { lineHeightFor, useSettings } from "../model/app-settings";
+import type { EditorSettings } from "../model/types";
 import { agentExtensions } from "./agents";
 
 const LANGUAGES: Record<string, { label: string; ext: () => Extension }> = {
@@ -60,9 +63,9 @@ const highlight = HighlightStyle.define([
 ]);
 
 const theme = EditorView.theme({
-  "&": { height: "100%", color: "var(--fg)", backgroundColor: "transparent", fontSize: "14px" },
+  "&": { height: "100%", color: "var(--fg)", backgroundColor: "transparent" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "var(--mono)", lineHeight: "22px", padding: "12px 0" },
+  ".cm-scroller": { fontFamily: "var(--mono)", padding: "12px 0" },
   ".cm-content": { caretColor: "var(--accent)", padding: "0 16px 0 0" },
   ".cm-line": { padding: "0" },
   ".cm-cursor, .cm-dropCursor": { borderLeft: "2px solid var(--accent)", marginLeft: "-1px" },
@@ -73,23 +76,65 @@ const theme = EditorView.theme({
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--strong)" },
   ".cm-agent-gutter .cm-gutterElement": { width: "24px", textAlign: "center" },
   ".cm-matchingBracket": { backgroundColor: "var(--line)", outline: "none" },
+  // See-through, so a selection on the line still shows.
+  ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--line) 40%, transparent)" },
 });
+
+// ---- The user's editor settings, swapped in place through one compartment ----
+
+const prefs = new Compartment();
+
+// A theme per size and per ligature choice, made once: a new theme each time would add a new style sheet.
+const sizeThemes = new Map<number, Extension>();
+function sizeTheme(fontSize: number): Extension {
+  let ext = sizeThemes.get(fontSize);
+  if (!ext) {
+    ext = EditorView.theme({
+      "&": { fontSize: `${fontSize}px` },
+      ".cm-scroller": { lineHeight: `${lineHeightFor(fontSize)}px` },
+    });
+    sizeThemes.set(fontSize, ext);
+  }
+  return ext;
+}
+// Fira Code draws its ligatures through contextual alternates, which "none" turns off.
+const ligaturesOn = EditorView.theme({ ".cm-content": { fontVariantLigatures: "normal" } });
+const ligaturesOff = EditorView.theme({ ".cm-content": { fontVariantLigatures: "none" } });
+const wrap = EditorView.lineWrapping;
+const numbers = lineNumbers();
+const activeLine = [highlightActiveLine(), highlightActiveLineGutter()];
+
+function prefsExtension(s: EditorSettings): Extension {
+  return [
+    s.lineNumbers ? numbers : [],
+    s.activeLine ? activeLine : [],
+    sizeTheme(s.fontSize),
+    s.ligatures ? ligaturesOn : ligaturesOff,
+    s.wordWrap ? wrap : [],
+    EditorState.tabSize.of(s.tabSize),
+    indentUnit.of(s.indent === "tabs" ? "\t" : " ".repeat(s.tabSize)),
+  ];
+}
+
+/** The effect that brings a buffer up to the given (or current) editor settings. */
+export function applyEditorSettings(settings: EditorSettings = useSettings.getState().editor): StateEffect<unknown> {
+  return prefs.reconfigure(prefsExtension(settings));
+}
 
 export function createEditorState(path: string, doc: string, extra: Extension = []): EditorState {
   const lang = LANGUAGES[extOf(path)];
   return EditorState.create({
     doc,
     extensions: [
-      lineNumbers(),
+      // First, so the line numbers stay left of the agents' gutter.
+      prefs.of(prefsExtension(useSettings.getState().editor)),
       agentExtensions,
-      highlightActiveLineGutter(),
       history(),
       drawSelection(),
       indentOnInput(),
       bracketMatching(),
       syntaxHighlighting(highlight),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-      EditorState.tabSize.of(2),
       theme,
       lang ? lang.ext() : [],
       extra,

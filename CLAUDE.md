@@ -19,6 +19,10 @@ run on an opened folder through Blixel's own tools.
 - `src/model/`: state (`store.ts`), types, path rules, the demo project and
   the scripted placeholder agents (`mock-agent.ts`). `protected-paths.json`
   is shared with the Rust core; its adapter test checks `fallback-models.json`.
+  Projects (`projects.ts`), saving and loading (`persist.ts`), tasks
+  (`tasks.ts`), agent actions (`agent-actions.ts`), app settings
+  (`app-settings.ts`), and typed wrappers for the core's data commands
+  (`core-api.ts`).
 - `src/editor/`: CodeMirror buffers shared by the user and agents, agent
   cursors and line marks, the typing replay, and conflicts between agent
   edits and unsaved changes (`sessions.ts`).
@@ -28,7 +32,9 @@ run on an opened folder through Blixel's own tools.
 - `src/layout/`: the changeable layout (columns of views, zen, view menus);
   state in `src/model/layout.ts`, views registered in `views.ts`.
 - `src/commands/`: every runnable command, the key dispatcher and the palette.
-- `src/settings/`: the Settings page (appearance, layout, keys).
+- `src/settings/`: the Settings page (appearance, editor, layout, new
+  agents, keys).
+- `src/connectors/`: the Connectors page and each agent's connector access.
 - `src/mods/`: mods. `types.ts` is the format, `registry.ts` loads built-in
   and installed mods, `runtime/` runs mod code sandboxed (its `frame/` files
   are served by the core), `builtin/` holds the built-in themes and layouts.
@@ -41,7 +47,13 @@ run on an opened folder through Blixel's own tools.
   MCP tool server (edit, write, bash) that enforces each agent's settings;
   `permissions.rs` holds questions for the user. `src/model/real-agent.ts` is
   the interface side.
-- `src-tauri/src/secrets.rs`: API keys in the system keychain.
+- `src-tauri/src/secrets.rs`: API keys and other secrets in the system keychain.
+- `src-tauri/src/store/`: the SQLite database in the app data folder
+  (projects, saved agents with a keyed check, documents and item lists for
+  the interface, copying files into a project).
+- `src-tauri/src/connectors/`: connectors (MCP servers): records, secrets,
+  clients, and the gateway that serves their tools to agents through
+  Blixel's tool server, gated per agent.
 - `src-tauri/src/mods/`: installed mods, approvals and file hashes, mod
   storage, the `mod://` scheme with its per-mod content policy, and the
   navigation guard. `build.rs` lists every app command for the permission

@@ -1,4 +1,6 @@
-import type { Agent, ChatItem } from "./types";
+import { DEMO_NAME } from "./demo-project";
+import type { ProjectData } from "./store";
+import type { Agent, ChatItem, Task } from "./types";
 
 const base: Omit<Agent, "id" | "name" | "role" | "program" | "runsOn" | "model" | "status"> = {
   avatarStyle: "pixelblob",
@@ -9,6 +11,7 @@ const base: Omit<Agent, "id" | "name" | "role" | "program" | "runsOn" | "model" 
   permissions: { read: "allow", edit: "allow", run: "allow", commit: "ask", push: "ask" },
   editPaths: "",
   rulePacks: [],
+  connectors: {},
   canMessage: true,
   takesTasks: true,
   canGiveTo: [],
@@ -105,3 +108,52 @@ export const PLACEHOLDER_SHELLS: Record<string, { title: string; data: string }>
   moth: { title: "", data: "" },
   juno: { title: "", data: "" },
 };
+
+const started = Date.now();
+
+/** Tasks in the demo: Kestrel's, which it finishes in the opening scene, and one for anyone. */
+export const PLACEHOLDER_TASKS: Task[] = [
+  {
+    id: "t-kestrel",
+    title: "Agents should only hand tasks to each other when a workspace rule allows it.",
+    notes: "Add the check and a test.",
+    status: "doing",
+    agentId: "kestrel",
+    createdBy: "user",
+    created: started,
+    updated: started,
+    sentItemId: "k1",
+    flag: null,
+  },
+  {
+    id: "t-review",
+    title: "Review the delegation check before it is pushed",
+    notes: "",
+    status: "todo",
+    agentId: null,
+    createdBy: "user",
+    created: started,
+    updated: started,
+    sentItemId: null,
+    flag: null,
+  },
+];
+
+/** The demo as it starts, every time it opens. Nothing in it is saved. */
+export function demoProject(): ProjectData {
+  return {
+    projectId: "demo",
+    name: DEMO_NAME,
+    agents: PLACEHOLDER_AGENTS,
+    agentTrust: {},
+    chats: PLACEHOLDER_CHATS,
+    shells: Object.fromEntries(Object.entries(PLACEHOLDER_SHELLS).map(([id, s]) => [id, { ...s, total: s.data.length }])),
+    tasks: PLACEHOLDER_TASKS,
+    selectedId: "kestrel",
+    following: "kestrel",
+    drafts: {},
+    collapsed: {},
+    openTabs: ["src/agents/router.ts"],
+    activePath: "src/agents/router.ts",
+  };
+}

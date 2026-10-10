@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../avatars/Avatar";
 import { AVATAR_STYLES, nameHue } from "../avatars/generator";
+import { APP_NAME } from "../brand";
+import { AgentConnectors } from "../connectors/AgentConnectors";
 import { isActive, modName, useMods, useRulePacks, type AvailableRulePack } from "../mods/registry";
+import { removeAgent } from "../model/agent-actions";
+import { useSettings } from "../model/app-settings";
 import { sendToAgent } from "../model/mock-agent";
 import { canRunForReal, hasApiKey, saveApiKey, sendToRealAgent, syncAgent } from "../model/real-agent";
 import { describeArea, PROTECTED_NAMES } from "../model/paths";
-import { agentById, hueOf, modelName, notify, saveAgent, showView, uid, useStore } from "../model/store";
+import { agentById, hueOf, modelName, notify, saveAgent, setAgentTrust, showView, uid, useStore } from "../model/store";
 import {
   FALLBACK_MODELS,
   PROGRAM_LABELS,
@@ -42,8 +46,10 @@ const RUNS_ON: { id: RunsOn; title: string; hint: string }[] = [
 
 const TOOLS: ToolId[] = ["read", "edit", "run", "commit", "push"];
 
+/** A new agent, starting from the defaults in Settings. */
 function blankAgent(taken: string[]): Agent {
   const name = NAME_POOL.find((n) => !taken.includes(n.toLowerCase())) ?? "";
+  const defaults = useSettings.getState().newAgent;
   return {
     id: uid("agent"),
     name,
@@ -52,19 +58,20 @@ function blankAgent(taken: string[]): Agent {
     hue: null,
     runsOn: "api-key",
     program: "claude-code",
-    model: FALLBACK_MODELS["claude-code"][0].id,
-    effort: "medium",
-    instructions: "",
-    readNotes: true,
-    permissions: { read: "allow", edit: "allow", run: "ask", commit: "ask", push: "ask" },
+    model: defaults.model || FALLBACK_MODELS["claude-code"][0].id,
+    effort: defaults.effort,
+    instructions: defaults.instructions,
+    readNotes: defaults.readNotes,
+    permissions: { ...defaults.permissions },
     editPaths: "",
     rulePacks: [],
+    connectors: {},
     canMessage: true,
     takesTasks: true,
     canGiveTo: [],
-    typingSpeed: 12,
+    typingSpeed: defaults.typingSpeed,
     dailyLimit: "",
-    whenIdle: "wait",
+    whenIdle: defaults.whenIdle,
     status: "idle",
     placeholder: true,
   };
@@ -73,6 +80,7 @@ function blankAgent(taken: string[]): Agent {
 export function AgentForm({ editingId }: { editingId: string | null }) {
   const agents = useStore((s) => s.agents);
   const editing = editingId ? agentById(editingId) : undefined;
+  const changedOutside = useStore((s) => (editingId ? s.agentTrust[editingId] === "changed-outside" : false));
   const [draft, setDraft] = useState<Agent>(() => editing ?? blankAgent(agents.map((a) => a.name.toLowerCase())));
   const [limitArea, setLimitArea] = useState(Boolean(editing?.editPaths.trim()));
   const [firstTask, setFirstTask] = useState("");
@@ -110,8 +118,11 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
         editPaths: limitArea ? draft.editPaths : "",
         placeholder: !real,
       };
-      if (real) await syncAgent(agent);
+      // Saving here is the user's review: in a project the core trusts the
+      // record again (if it was changed outside the app) and saves it.
+      const saved = await syncAgent(agent, true);
       saveAgent(agent);
+      if (saved?.trust === "changed-outside") setAgentTrust(agent.id, "changed-outside");
       const task = firstTask.trim();
       if (!editing && task) {
         if (real) void sendToRealAgent(agent.id, task, true);
@@ -131,6 +142,13 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
           <h1>{editing ? editing.name : "New agent"}</h1>
           <div className="muted">Everything here can be changed later.</div>
         </div>
+
+        {changedOutside && (
+          <div className="form-warning" role="status">
+            This agent's saved settings were changed outside {APP_NAME}. Its permissions were lowered to Ask, and it does not
+            run until you review them here and save.
+          </div>
+        )}
 
         <section aria-label="Identity" className="panel">
           <h2>Identity</h2>
@@ -247,7 +265,7 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
         </section>
 
         <section aria-label="Tools" className="panel">
-          <h2 className="tight">Tools</h2>
+          <h2 className="tight">Tools and connectors</h2>
           <div className="hint-line">Ask means it stops and waits for you each time.</div>
           {TOOLS.map((tool) => (
             <div key={tool}>
@@ -297,9 +315,10 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
               )}
             </div>
           ))}
+          <AgentConnectors draft={draft} setDraft={setDraft} />
           <div className="tool-foot label">
             Changes to agent settings and instruction files, and to git's own folder, always ask you first:{" "}
-            {PROTECTED_NAMES.join(", ")}. Connectors come later.
+            {PROTECTED_NAMES.join(", ")}.
           </div>
         </section>
 
@@ -401,6 +420,7 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
         limitArea={limitArea}
         problem={problem}
         editing={Boolean(editing)}
+        reviewing={changedOutside}
         real={real}
         onSubmit={() => void submit()}
       />
@@ -630,6 +650,8 @@ function Preview(props: {
   limitArea: boolean;
   problem: string | null;
   editing: boolean;
+  /** Its saved settings were changed outside the app: saving is the user's review. */
+  reviewing: boolean;
   real: boolean;
   onSubmit: () => void;
 }) {
@@ -733,12 +755,22 @@ function Preview(props: {
           <div className="label">Only Claude Code with an API key runs for real so far; this agent will be a scripted placeholder.</div>
         )}
         <button type="button" className="btn primary big" disabled={Boolean(props.problem)} onClick={props.onSubmit}>
-          {props.editing ? "Save changes" : "Create agent"}
+          {props.reviewing ? "Save reviewed settings" : props.editing ? "Save changes" : "Create agent"}
         </button>
         <button type="button" className="btn big" onClick={() => showView({ kind: "main" })}>
           Cancel
         </button>
+        {props.editing && <RemoveAgent agent={draft} />}
       </div>
     </aside>
+  );
+}
+
+/** Removing an existing agent; removeAgent asks first, and leaves this page if it goes. */
+function RemoveAgent({ agent }: { agent: Agent }) {
+  return (
+    <button type="button" className="link-btn form-remove" onClick={() => removeAgent(agent.id).catch((e) => notify(String(e)))}>
+      Remove agent…
+    </button>
   );
 }

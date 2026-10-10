@@ -323,9 +323,10 @@ body[data-resizing="y"] { cursor: row-resize; }
 .activity-row.refused .muted { color: var(--danger-fg); }
 
 .perm-title { margin-bottom: 8px; }
+/* Wrapped, never scrolled sideways: nothing in a request can sit out of view. */
 .perm-detail {
   padding: 7px 12px; background: var(--danger-bg); border: 1px solid var(--danger-line);
-  border-radius: 8px; color: var(--danger-fg); overflow-x: auto; white-space: nowrap;
+  border-radius: 8px; color: var(--danger-fg); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .perm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 

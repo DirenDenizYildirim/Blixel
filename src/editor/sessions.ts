@@ -17,9 +17,10 @@ import {
   type TransactionSpec,
 } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { useSettings } from "../model/app-settings";
 import { agentById, getBackend, notify, onWorkspaceChange, setConflict, setCursor, setDirty, useStore } from "../model/store";
 import { caretOf, clearCaret, markLines, setCaret } from "./agents";
-import { createEditorState } from "./setup";
+import { applyEditorSettings, createEditorState } from "./setup";
 
 /** Marks transactions that replay an agent's edit, so they never count as unsaved user changes. */
 export const agentEdit = Annotation.define<string>();
@@ -120,6 +121,21 @@ export function showPath(path: string) {
   const line = next.doc.lineAt(head);
   setCursor(line.number, head - line.from + 1);
 }
+
+/** Brings every buffer, shown or not, up to the current editor settings. */
+export function reconfigureAll() {
+  const effects = applyEditorSettings();
+  for (const path of [...sessions.keys()]) {
+    if (path === viewPath && view) continue;
+    sessions.set(path, sessions.get(path)!.update({ effects }).state);
+  }
+  view?.dispatch({ effects });
+}
+
+// Settings apply as they change; buffers made later start with them.
+useSettings.subscribe((now, before) => {
+  if (now.editor !== before.editor) reconfigureAll();
+});
 
 export function dispatchTo(path: string, spec: TransactionSpec) {
   if (path === viewPath && view) {
@@ -284,7 +300,8 @@ function editShown(path: string) {
 
 /**
  * Shows an agent's edit, already on disk, in the file's buffer: typed out at
- * the agent's speed, or at once when it is large or replaces every match.
+ * the agent's speed, or at once when the user chose that in the settings, or
+ * when it is large or replaces every match.
  * Pair every call with an earlier `expectEdit(path)`.
  */
 export async function showAgentEdit(e: AgentEdit) {
@@ -318,7 +335,8 @@ async function show(e: AgentEdit) {
     else conflictWith(agentId, path);
     return;
   }
-  if (e.replaceAll || before!.length > MAX_TYPED_BYTES || placed.length > MAX_TYPED_HUNKS) {
+  const instant = useSettings.getState().editor.agentEdits === "instant";
+  if (instant || e.replaceAll || before!.length > MAX_TYPED_BYTES || placed.length > MAX_TYPED_HUNKS) {
     applyAtOnce(agentId, path, placed);
   } else if (!(await typeHunks(agentId, path, placed))) {
     // The user typed inside a part the agent was still to change.

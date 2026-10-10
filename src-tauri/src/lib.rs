@@ -1,8 +1,10 @@
 mod agents;
+mod connectors;
 mod events;
 mod mods;
 mod rules;
 mod secrets;
+mod store;
 mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,7 +23,14 @@ pub fn run() {
             let dev_url = dev_url.clone();
             move |app| {
                 use tauri::Manager;
-                app.manage(agents::Agents::new(events::Events::new(app.handle().clone())));
+                let hub = std::sync::Arc::new(connectors::Hub::default());
+                hub.attach(app.handle().clone());
+                app.manage(agents::Agents::new(events::Events::new(app.handle().clone()), hub.clone()));
+                app.manage(hub);
+                // A broken or busy database never stops the app: see `store_status`.
+                let (db, status) = store::Db::open_or_recover(&app.path().app_data_dir()?);
+                app.manage(db);
+                app.manage(status);
                 app.manage(mods::Mods::open(app.path().app_data_dir()?, no_mods));
                 // The window from tauri.conf.json exists by now; its page has not loaded yet.
                 let window = app.get_webview_window("main").ok_or("the main window is missing")?;
@@ -49,6 +58,30 @@ pub fn run() {
             mods::mods_set_enabled,
             mods::mod_storage_get,
             mods::mod_storage_set,
+            store::store_status,
+            store::store_get,
+            store::store_set,
+            store::items_load,
+            store::items_put,
+            store::items_delete,
+            store::projects_list,
+            store::project_create,
+            store::project_for_folder,
+            store::project_open,
+            store::project_close,
+            store::project_update,
+            store::project_remove,
+            store::files_measure,
+            store::files_copy_in,
+            agents::agent_save,
+            agents::agents_list,
+            agents::agent_remove,
+            connectors::connectors_list,
+            connectors::connector_save,
+            connectors::connector_remove,
+            connectors::connector_set_secret,
+            connectors::connector_test,
+            connectors::connector_approve,
         ]))
         .build(context)
         .expect("error while building tauri application");

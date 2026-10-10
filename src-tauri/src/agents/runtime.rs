@@ -4,6 +4,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use tokio_util::sync::CancellationToken;
+
 use crate::events::{Events, Status};
 
 use super::permissions::{Answer, Broker};
@@ -17,6 +19,9 @@ pub struct AgentRuntime {
     turn_active: AtomicBool,
     stopped: AtomicBool,
     last_status: Mutex<Option<Status>>,
+    /// Cancelled when the user stops the agent, so its running commands stop
+    /// even if its program does not cancel them; then renewed for later ones.
+    commands: Mutex<CancellationToken>,
 }
 
 /// The outcome of checking a tool call against the agent's settings.
@@ -38,6 +43,7 @@ impl AgentRuntime {
             turn_active: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             last_status: Mutex::new(None),
+            commands: Mutex::new(CancellationToken::new()),
         })
     }
 
@@ -58,6 +64,18 @@ impl AgentRuntime {
         self.stopped.store(true, Ordering::SeqCst);
         self.broker.deny_all(&self.events, &self.id);
         self.refresh_status();
+    }
+
+    /// What stops the commands the agent runs from now on.
+    pub fn commands_stop(&self) -> CancellationToken {
+        self.commands.lock().expect("commands lock").clone()
+    }
+
+    /// Stops every command the agent is running (the user pressed Stop, or
+    /// its session is closing). Commands started later run normally.
+    pub fn stop_commands(&self) {
+        let running = std::mem::replace(&mut *self.commands.lock().expect("commands lock"), CancellationToken::new());
+        running.cancel();
     }
 
     /// Clears the stopped state before the agent's process starts again.
@@ -88,15 +106,53 @@ impl AgentRuntime {
     /// Asks the user directly, whatever the setting says. Nothing records the
     /// answer, so the request offers no "Always allow".
     pub async fn ask(&self, tool: Tool, title: &str, detail: &str) -> Answer {
-        self.ask_with(tool, title, detail, false).await
+        self.ask_with(tool.as_str(), title, detail, false).await
     }
 
-    async fn ask_with(&self, tool: Tool, title: &str, detail: &str, always_offered: bool) -> Answer {
-        let reply = self.broker.open(&self.events, &self.id, tool.as_str(), title, detail, always_offered);
+    /// `tool` is a tool's id or `connector:<id>`, which the interface shows.
+    async fn ask_with(&self, tool: &str, title: &str, detail: &str, always_offered: bool) -> Answer {
+        let reply = self.broker.open(&self.events, &self.id, tool, title, detail, always_offered);
         self.refresh_status();
         let answer = reply.await.unwrap_or(Answer::Denied);
         self.refresh_status();
         answer
+    }
+
+    /// The agent's access to a connector; one it was not given is Off.
+    pub fn connector_setting(&self, connector_id: &str) -> Setting {
+        self.config.read().expect("config lock").connectors.get(connector_id).copied().unwrap_or(Setting::Off)
+    }
+
+    /// Applies the agent's setting for a connector to one of its calls. Off
+    /// refuses, Ask asks, Allow passes. While the connector's tools differ
+    /// from the ones the user approved (`changed`), every call asks and the
+    /// answer is not remembered.
+    pub async fn gate_connector(&self, connector_id: &str, changed: bool, title: &str, detail: &str) -> Gate {
+        let tool = format!("connector:{connector_id}");
+        let setting = self.connector_setting(connector_id);
+        let always_offered = match setting {
+            Setting::Off => return Gate::Off,
+            _ if changed => false,
+            Setting::Allow => return Gate::Allowed,
+            Setting::Ask => true,
+        };
+        match self.ask_with(&tool, title, detail, always_offered).await {
+            Answer::Denied => Gate::Denied,
+            Answer::Allowed => Gate::Allowed,
+            Answer::Always if !always_offered => Gate::Allowed,
+            Answer::Always => {
+                let (permissions, connectors) = {
+                    let mut config = self.config.write().expect("config lock");
+                    config.connectors.insert(connector_id.to_string(), Setting::Allow);
+                    (
+                        serde_json::to_value(&config.permissions).unwrap_or_default(),
+                        serde_json::to_value(&config.connectors).unwrap_or_default(),
+                    )
+                };
+                self.events.settings(&self.id, &permissions, Some(&connectors));
+                Gate::Allowed
+            }
+        }
     }
 
     /// Applies the settings for every tool a call needs: any Off refuses, any
@@ -114,7 +170,7 @@ impl AgentRuntime {
             return Gate::Allowed;
         }
         let strictest = *asked.last().expect("non-empty");
-        match self.ask_with(strictest, title, detail, true).await {
+        match self.ask_with(strictest.as_str(), title, detail, true).await {
             Answer::Denied => Gate::Denied,
             Answer::Allowed => Gate::Allowed,
             Answer::Always => {
@@ -125,7 +181,7 @@ impl AgentRuntime {
                     }
                     serde_json::to_value(&config.permissions).unwrap_or_default()
                 };
-                self.events.settings(&self.id, &permissions);
+                self.events.settings(&self.id, &permissions, None);
                 Gate::Allowed
             }
         }

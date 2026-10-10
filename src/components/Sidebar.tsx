@@ -1,39 +1,34 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Avatar } from "../avatars/Avatar";
 import { APP_NAME } from "../brand";
+import { keyBindings } from "../commands/keys";
+import { formatKey } from "../commands/keynames";
 import { runCommand } from "../commands/registry";
 import { expandSidebar, toggleSidebar, useLayout } from "../model/layout";
-import {
-  hueOf,
-  notify,
-  openDemo,
-  openFile,
-  openFolder,
-  selectAgent,
-  showView,
-  toggleFiles,
-  toggleFolder,
-  useStore,
-} from "../model/store";
+import { hueOf, notify, openFile, selectAgent, showView, toggleFiles, toggleFolder, useStore, type View } from "../model/store";
 import { PROGRAM_LABELS, type Agent, type AgentStatus, type TreeEntry } from "../model/types";
 import { agentColor } from "../theme/theme";
+import { AgentMenu } from "./AgentMenu";
 import { StatusLabel } from "./controls";
 import {
   AgentsIcon,
   ChevronDown,
   ChevronRight,
+  ConnectorsIcon,
   FolderIcon,
   MenuIcon,
   ModsIcon,
-  OpenIcon,
+  MoreIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
-  TasksIcon,
-  TerminalIcon,
   ThemeIcon,
+  WarnIcon,
 } from "./icons";
+import { toggleNew, useNewPopover } from "./NewPopover";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ThemeMenu } from "./ThemeMenu";
+import "./sidebar.css";
 
 export function avatarMode(status: AgentStatus) {
   return status === "working" ? "working" : status === "waiting" ? "waiting" : "idle";
@@ -46,13 +41,22 @@ export function agentSubline(agent: Pick<Agent, "program" | "runsOn">) {
   return program;
 }
 
-export function AgentRow({ agent, current, onClick }: { agent: Agent; current?: boolean; onClick?: () => void }) {
+/** Said wherever an agent shows that its saved settings were changed outside the app. */
+export const UNREVIEWED = "Settings changed outside the app; review them before it runs";
+
+export function AgentRow(props: { agent: Agent; current?: boolean; unreviewed?: boolean; onClick?: () => void }) {
+  const { agent } = props;
   return (
-    <button type="button" className="agent-row" aria-current={current || undefined} onClick={onClick}>
+    <button type="button" className="agent-row" aria-current={props.current || undefined} onClick={props.onClick}>
       <Avatar name={agent.name} style={agent.avatarStyle} mode={avatarMode(agent.status)} size={32} hue={hueOf(agent)} />
       <span className="agent-row-text">
         <span className="agent-row-top">
           <span className="agent-row-name">{agent.name || "Unnamed"}</span>
+          {props.unreviewed && (
+            <span className="trust-mark" role="img" aria-label={UNREVIEWED} title={UNREVIEWED}>
+              <WarnIcon />
+            </span>
+          )}
           <StatusLabel status={agent.status} />
         </span>
         <span className="agent-row-sub">{agentSubline(agent)}</span>
@@ -61,31 +65,11 @@ export function AgentRow({ agent, current, onClick }: { agent: Agent; current?: 
   );
 }
 
-const later = (what: string) => () => notify(`${what} comes in a later milestone.`);
-
 /** Search opens the command palette. */
 const search = () => void runCommand("palette.open").catch(() => notify("Search comes in a later milestone."));
 
-const openMods = () => showView({ kind: "mods" });
-
-/** The Settings page, from the gear at the foot of the sidebar. */
-function SettingsButton() {
-  const current = useStore((s) => s.view.kind === "settings");
-  return (
-    <div className="sidebar-foot">
-      <button
-        type="button"
-        className="icon-btn muted"
-        aria-label="Settings"
-        title="Settings (Ctrl+,)"
-        aria-current={current ? "page" : undefined}
-        onClick={() => showView({ kind: "settings" })}
-      >
-        <SettingsIcon />
-      </button>
-    </div>
-  );
-}
+const newAgentPage = (view: View) => view.kind === "agent-form" && !view.editingId;
+const statusText = (a: Agent) => (a.status === "waiting" ? "needs you" : a.status);
 
 export function Sidebar() {
   const collapsed = useLayout((l) => l.nav.collapsed);
@@ -96,174 +80,231 @@ export function Sidebar() {
 
 function FullSidebar({ width }: { width: number }) {
   const agents = useStore((s) => s.agents);
+  const trust = useStore((s) => s.agentTrust);
   const selectedId = useStore((s) => s.selectedId);
   const view = useStore((s) => s.view);
   const filesOpen = useStore((s) => s.filesOpen);
-  const workspace = useStore((s) => s.workspace);
-  const [themeOpen, setThemeOpen] = useState(false);
+  const newOpen = useNewPopover((s) => s.open);
 
   return (
-    <nav aria-label="Workspace" className="sidebar" style={{ flexBasis: width }}>
+    <nav aria-label="Workspace" className="sidebar nav-full" style={{ flexBasis: width }}>
       <div className="sidebar-head" data-tauri-drag-region>
         <button type="button" className="icon-btn" aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl+B)" onClick={toggleSidebar}>
           <MenuIcon />
         </button>
         <span className="brand" data-tauri-drag-region>{APP_NAME}</span>
       </div>
+      <ProjectSwitcher />
 
-      <div className="side-group">
-        <button type="button" className="side-item" onClick={search}>
-          <SearchIcon />
-          <span>Search</span>
-        </button>
-        <button
-          type="button"
-          className="side-item"
-          aria-current={view.kind === "agent-form" && !view.editingId ? "page" : undefined}
-          onClick={() => showView({ kind: "agent-form", editingId: null })}
-        >
-          <PlusIcon />
-          <span>New agent</span>
-        </button>
-        <div className="side-item side-label">
-          <AgentsIcon />
-          <span>Agents</span>
+      <div className="side-scroll">
+        <div className="side-group">
+          <button type="button" className="side-item" onClick={search}>
+            <SearchIcon />
+            <span>Search</span>
+          </button>
+          <button
+            type="button"
+            className="side-item"
+            data-new-anchor
+            aria-haspopup="dialog"
+            aria-expanded={newOpen}
+            aria-current={newAgentPage(view) ? "page" : undefined}
+            onClick={toggleNew}
+          >
+            <PlusIcon />
+            <span>New</span>
+          </button>
+          <div className="side-item side-label">
+            <AgentsIcon />
+            <span>Agents</span>
+          </div>
         </div>
-      </div>
 
-      <div className="side-group agents">
-        {agents.map((a) => (
-          <AgentRow
-            key={a.id}
-            agent={a}
-            current={view.kind === "main" && a.id === selectedId}
-            onClick={() => selectAgent(a.id)}
-          />
-        ))}
-      </div>
-
-      <div className="side-group files">
-        <button type="button" className="side-item" aria-expanded={filesOpen} onClick={toggleFiles}>
-          <FolderIcon />
-          <span className="grow">Files</span>
-          {filesOpen ? <ChevronDown /> : <ChevronRight />}
-        </button>
-        {filesOpen && (
-          <>
-            <div className="project-row">
-              <span className="grow" title={workspace.name}>
-                {workspace.name}
-              </span>
-              {workspace.kind === "folder" ? (
-                <button type="button" className="link-btn" onClick={() => void openDemo()}>
-                  demo
-                </button>
-              ) : null}
-              <button type="button" className="icon-btn small" aria-label="Open a folder" title="Open a folder" onClick={() => void openFolder()}>
-                <OpenIcon />
+        <div className="side-group agents">
+          {agents.map((a) => (
+            <AgentItem key={a.id} agent={a} current={view.kind === "main" && a.id === selectedId} unreviewed={Boolean(trust[a.id])} />
+          ))}
+          {agents.length === 0 && (
+            <div className="side-empty">
+              No agents here yet.{" "}
+              <button type="button" className="link-btn" onClick={() => showView({ kind: "agent-form", editingId: null })}>
+                Add one
               </button>
             </div>
-            <FileTree />
-          </>
-        )}
-        <button type="button" className="side-item spaced" onClick={later("The task board")}>
-          <TasksIcon />
-          <span>Tasks</span>
-        </button>
-        <button type="button" className="side-item" onClick={later("Your own terminal")}>
-          <TerminalIcon />
-          <span>Terminal</span>
-        </button>
-        <button type="button" className="side-item" aria-current={view.kind === "mods" ? "page" : undefined} onClick={openMods}>
-          <ModsIcon />
-          <span>Mods</span>
-        </button>
-        <div className="theme-anchor">
-          <button type="button" className="side-item" aria-expanded={themeOpen} onClick={() => setThemeOpen(!themeOpen)}>
-            <ThemeIcon />
-            <span>Theme</span>
+          )}
+        </div>
+
+        <div className="side-group files">
+          <button type="button" className="side-item" aria-expanded={filesOpen} onClick={toggleFiles}>
+            <FolderIcon />
+            <span className="grow">Files</span>
+            {filesOpen ? <ChevronDown /> : <ChevronRight />}
           </button>
-          {themeOpen && <ThemeMenu onClose={() => setThemeOpen(false)} />}
+          {filesOpen && <FileTree />}
         </div>
       </div>
 
-      <div className="grow min-gap" />
-      <SettingsButton />
+      <SidebarFoot rail={false} />
     </nav>
+  );
+}
+
+/** An agent in the list, with its "⋯" menu on hover or focus (or a right click). */
+function AgentItem({ agent, current, unreviewed }: { agent: Agent; current: boolean; unreviewed: boolean }) {
+  const [menu, setMenu] = useState(false);
+  const more = useRef<HTMLButtonElement>(null);
+  return (
+    <div
+      className="agent-item"
+      data-open={menu || undefined}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu(true);
+      }}
+    >
+      <AgentRow agent={agent} current={current} unreviewed={unreviewed} onClick={() => selectAgent(agent.id)} />
+      <button
+        ref={more}
+        type="button"
+        className="agent-more"
+        aria-label={`Actions for ${agent.name}`}
+        title="Edit, duplicate, copy or remove"
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        onClick={() => setMenu(!menu)}
+      >
+        <MoreIcon />
+      </button>
+      {menu && <AgentMenu agent={agent} anchor={() => more.current} place="below-end" onClose={() => setMenu(false)} />}
+    </div>
+  );
+}
+
+/** Mods, Connectors, Theme and Settings: a row of icons at the foot, or a column on the rail. */
+function SidebarFoot({ rail }: { rail: boolean }) {
+  const page = useStore((s) => s.view.kind);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const themeButton = useRef<HTMLButtonElement>(null);
+  const settingsKey = keyBindings().byCommand.get("settings.open");
+  const cls = rail ? "rail-btn" : "icon-btn muted foot-btn";
+  const icon = { size: 17, color: "currentColor" };
+  const pageButton = (kind: View["kind"], label: string, Icon: (p: typeof icon) => React.ReactNode, hint = label) => (
+    <button
+      type="button"
+      className={cls}
+      aria-label={label}
+      title={hint}
+      aria-current={page === kind ? "page" : undefined}
+      onClick={() => showView({ kind } as View)}
+    >
+      <Icon {...icon} />
+    </button>
+  );
+
+  return (
+    <div className={rail ? "rail-foot" : "sidebar-foot foot-row"}>
+      {pageButton("mods", "Mods", ModsIcon)}
+      {pageButton("connectors", "Connectors", ConnectorsIcon)}
+      <button
+        ref={themeButton}
+        type="button"
+        className={cls}
+        aria-label="Theme"
+        title="Theme"
+        aria-haspopup="menu"
+        aria-expanded={themeOpen}
+        onClick={() => setThemeOpen(!themeOpen)}
+      >
+        <ThemeIcon {...icon} />
+      </button>
+      {pageButton("settings", "Settings", SettingsIcon, settingsKey ? `Settings (${formatKey(settingsKey)})` : "Settings")}
+      {themeOpen && (
+        <ThemeMenu anchor={() => themeButton.current} place={rail ? "beside" : "above-start"} onClose={() => setThemeOpen(false)} />
+      )}
+    </div>
   );
 }
 
 /** The collapsed sidebar: icons and agent avatars only. */
 function SidebarRail({ side }: { side: "left" | "right" }) {
   const agents = useStore((s) => s.agents);
+  const trust = useStore((s) => s.agentTrust);
   const selectedId = useStore((s) => s.selectedId);
   const view = useStore((s) => s.view);
-  const expandTo = (filesOpen: boolean) => () => {
+  const newOpen = useNewPopover((s) => s.open);
+  const openFiles = () => {
     if (!expandSidebar()) return;
-    if (filesOpen && !useStore.getState().filesOpen) toggleFiles();
+    if (!useStore.getState().filesOpen) toggleFiles();
   };
 
   return (
-    <nav aria-label="Workspace" className="sidebar rail" data-side={side}>
+    <nav aria-label="Workspace" className="sidebar rail nav-rail" data-side={side}>
       <div className="sidebar-head rail-head" data-tauri-drag-region>
         <button type="button" className="icon-btn" aria-label="Expand sidebar" title="Expand sidebar (Ctrl+B)" onClick={toggleSidebar}>
           <MenuIcon />
         </button>
       </div>
-      <button type="button" className="rail-btn" aria-label="Search" title="Search" onClick={search}>
-        <SearchIcon />
-      </button>
-      <button
-        type="button"
-        className="rail-btn"
-        aria-label="New agent"
-        title="New agent"
-        aria-current={view.kind === "agent-form" && !view.editingId ? "page" : undefined}
-        onClick={() => showView({ kind: "agent-form", editingId: null })}
-      >
-        <PlusIcon />
-      </button>
-      <div className="rail-agents">
-        {agents.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            className="rail-agent"
-            aria-label={`${a.name}, ${a.status === "waiting" ? "needs you" : a.status}`}
-            title={`${a.name}, ${a.status === "waiting" ? "needs you" : a.status}`}
-            aria-current={view.kind === "main" && a.id === selectedId ? true : undefined}
-            onClick={() => selectAgent(a.id)}
-          >
-            <Avatar name={a.name} style={a.avatarStyle} mode={avatarMode(a.status)} size={32} hue={hueOf(a)} />
-            <span className="rail-dot" data-status={a.status} />
-          </button>
-        ))}
+      <ProjectSwitcher rail />
+      <div className="rail-scroll">
+        <button type="button" className="rail-btn" aria-label="Search" title="Search" onClick={search}>
+          <SearchIcon />
+        </button>
+        <button
+          type="button"
+          className="rail-btn"
+          data-new-anchor
+          aria-label="New"
+          title="New project, task or agent"
+          aria-haspopup="dialog"
+          aria-expanded={newOpen}
+          aria-current={newAgentPage(view) ? "page" : undefined}
+          onClick={toggleNew}
+        >
+          <PlusIcon />
+        </button>
+        <div className="rail-agents">
+          {agents.map((a) => (
+            <RailAgent key={a.id} agent={a} current={view.kind === "main" && a.id === selectedId} unreviewed={Boolean(trust[a.id])} />
+          ))}
+        </div>
+        <button type="button" className="rail-btn" aria-label="Files" title="Files" onClick={openFiles}>
+          <FolderIcon />
+        </button>
       </div>
-      <button type="button" className="rail-btn" aria-label="Files" title="Files" onClick={expandTo(true)}>
-        <FolderIcon />
-      </button>
-      <button type="button" className="rail-btn" aria-label="Tasks" title="Tasks" onClick={later("The task board")}>
-        <TasksIcon />
-      </button>
-      <button type="button" className="rail-btn" aria-label="Terminal" title="Terminal" onClick={later("Your own terminal")}>
-        <TerminalIcon />
-      </button>
-      <button
-        type="button"
-        className="rail-btn"
-        aria-label="Mods"
-        title="Mods"
-        aria-current={view.kind === "mods" ? "page" : undefined}
-        onClick={openMods}
-      >
-        <ModsIcon />
-      </button>
-      <button type="button" className="rail-btn" aria-label="Theme" title="Theme" onClick={expandTo(false)}>
-        <ThemeIcon />
-      </button>
-      <div className="grow min-gap" />
-      <SettingsButton />
+      <SidebarFoot rail />
     </nav>
+  );
+}
+
+function RailAgent({ agent: a, current, unreviewed }: { agent: Agent; current: boolean; unreviewed: boolean }) {
+  const [menu, setMenu] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const label = `${a.name}, ${statusText(a)}${unreviewed ? `. ${UNREVIEWED}` : ""}`;
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="rail-agent"
+        aria-label={label}
+        title={label}
+        aria-current={current || undefined}
+        onClick={() => selectAgent(a.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu(true);
+        }}
+      >
+        <Avatar name={a.name} style={a.avatarStyle} mode={avatarMode(a.status)} size={32} hue={hueOf(a)} />
+        <span className="rail-dot" data-status={a.status} />
+        {unreviewed && (
+          <span className="rail-trust" aria-hidden="true">
+            <WarnIcon size={12} />
+          </span>
+        )}
+      </button>
+      {menu && <AgentMenu agent={a} anchor={() => button.current} place="beside" onClose={() => setMenu(false)} />}
+    </>
   );
 }
 

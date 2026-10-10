@@ -6,6 +6,7 @@ import { AgentForm } from "../components/AgentForm";
 import { StatusBar } from "../components/EditorPanel";
 import { Sidebar as FullSidebar } from "../components/Sidebar";
 import { Splitter } from "../components/Splitter";
+import { ConnectorsPage } from "../connectors/ConnectorsPage";
 import { ModsPage } from "../mods/ModsPage";
 import { modName } from "../mods/registry";
 import { SettingsPage } from "../settings/SettingsPage";
@@ -84,6 +85,7 @@ export function Workspace() {
 function Page({ view }: { view: View }) {
   if (view.kind === "agent-form") return <AgentForm key={view.editingId ?? "new"} editingId={view.editingId} />;
   if (view.kind === "settings") return <SettingsPage />;
+  if (view.kind === "connectors") return <ConnectorsPage />;
   return <ModsPage />;
 }
 

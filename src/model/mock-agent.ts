@@ -8,6 +8,7 @@ import {
   agentById,
   getBackend,
   logActivity,
+  onWorkspaceChange,
   patchActivity,
   patchChat,
   pushChat,
@@ -20,6 +21,7 @@ import {
   useStore,
   writeShell,
 } from "./store";
+import { addHandedTask, followDemoTask, linkTaskMessage, taskEnded, taskStarted } from "./tasks";
 import type { ActivityVerb, ChatItem, PermissionState, ToolId } from "./types";
 
 type Answer = Exclude<PermissionState, "open">;
@@ -32,37 +34,69 @@ export function answerPermission(agentId: string, itemId: string, answer: Answer
   const item = useStore.getState().chats[agentId]?.find((it) => it.id === itemId);
   if (item?.kind !== "permission" || item.state !== "open") return;
   patchChat(agentId, itemId, { state: answer });
-  if (answer === "always") {
-    const agent = agentById(agentId);
-    if (agent) updateAgent(agentId, { permissions: { ...agent.permissions, [item.tool]: "allow" } });
+  const agent = agentById(agentId);
+  if (answer === "always" && agent) {
+    const tool = item.tool;
+    if (tool.startsWith("connector:")) updateAgent(agentId, { connectors: { ...agent.connectors, [tool.slice(10)]: "allow" } });
+    else updateAgent(agentId, { permissions: { ...agent.permissions, [tool as ToolId]: "allow" } });
   }
   waiting.get(itemId)?.(answer);
   waiting.delete(itemId);
 }
 
+/** Thrown inside a script whose project closed, to end it quietly. */
+class Stopped extends Error {}
+
+// Another project opened: scripts waiting on the user give up, and their queues start empty.
+onWorkspaceChange(() => {
+  waiting.forEach((resolve) => resolve("denied"));
+  waiting.clear();
+  queues.clear();
+});
+
 class Script {
   /** The last file the agent typed in, where its cursor still shows. */
   private lastPath: string | null = null;
+  /** The project the script runs in; its files, even if another project has opened since. */
+  private readonly epoch = useStore.getState().epoch;
+  private readonly backend = getBackend();
+
+  /** The script's own project files. */
+  get files() {
+    return this.backend;
+  }
 
   constructor(readonly agentId: string) {}
 
   get agent() {
-    return agentById(this.agentId)!;
+    this.check();
+    const agent = agentById(this.agentId);
+    if (!agent) throw new Stopped();
+    return agent;
+  }
+
+  /** Ends the script once its project is no longer open. */
+  check() {
+    if (useStore.getState().epoch !== this.epoch) throw new Stopped();
   }
 
   status(status: Parameters<typeof setStatus>[1]) {
+    this.check();
     setStatus(this.agentId, status);
   }
 
-  pause(ms: number) {
-    return sleep(ms);
+  async pause(ms: number) {
+    await sleep(ms);
+    this.check();
   }
 
   /** Streams a reply into the agent's chat. */
   async say(text: string, to: string = this.agentId) {
+    this.check();
     const id = uid("m");
     pushChat(to, { kind: "agent", id, agentId: this.agentId, text: "", streaming: true });
     for (let i = 0; i < text.length; i += 3) {
+      this.check();
       patchChat(to, id, { text: text.slice(0, i + 3) } as Partial<ChatItem>);
       await sleep(18);
     }
@@ -83,6 +117,7 @@ class Script {
     pushChat(this.agentId, { kind: "permission", id, agentId: this.agentId, tool, title, detail, state: "open", alwaysOffered: !forceAsk });
     this.status("waiting");
     const answer = await new Promise<Answer>((resolve) => waiting.set(id, resolve));
+    this.check();
     this.status("working");
     return answer !== "denied";
   }
@@ -94,8 +129,9 @@ class Script {
     }
     const entry = this.log("READ", path, "reading", true);
     setPresence(this.agentId, { agentId: this.agentId, path, mode: "reading" });
+    this.check();
     await showReading(this.agentId, path, fromLine, toLine);
-    await sleep(1600);
+    await this.pause(1600);
     hideCaret(this.agentId, path);
     setPresence(this.agentId, null);
     patchActivity(this.agentId, entry, { result: "done", live: false });
@@ -126,7 +162,8 @@ class Script {
       return false;
     }
 
-    const backend = getBackend();
+    this.check();
+    const backend = this.backend;
     let disk = "";
     try {
       disk = await backend.read(path);
@@ -169,20 +206,26 @@ class Script {
     startShell(this.agentId, command);
     writeShell(this.agentId, `\x1b[90m$ ${command}\x1b[0m\r\n`);
     for (const line of output) {
-      await sleep(140);
+      await this.pause(140);
       writeShell(this.agentId, line + "\r\n");
     }
     patchActivity(this.agentId, entry, { result, live: false });
     return true;
   }
 
+  /** Hands a task to another agent; returns the hand-off's id in that agent's chat. */
   handoff(toId: string, task: string, note: string) {
+    this.check();
     const item = { kind: "handoff" as const, from: this.agentId, to: toId, task, note };
+    const theirs = uid("h");
     pushChat(this.agentId, { ...item, id: uid("h") });
-    pushChat(toId, { ...item, id: uid("h") });
+    pushChat(toId, { ...item, id: theirs });
+    addHandedTask(this.agentId, toId, task, theirs);
+    return theirs;
   }
 
   done() {
+    this.check();
     if (this.lastPath) hideCaret(this.agentId, this.lastPath);
     setPresence(this.agentId, null);
     this.status("idle");
@@ -207,26 +250,35 @@ const queues = new Map<string, Promise<void>>();
 /** Runs a job after everything the agent is already doing. */
 function enqueue(agentId: string, job: () => Promise<void>) {
   const prev = queues.get(agentId) ?? Promise.resolve();
-  const next = prev.then(job).catch((e) => console.error(e));
+  const next = prev.then(job).catch((e) => {
+    if (!(e instanceof Stopped)) console.error(e);
+  });
   queues.set(agentId, next);
   void next.then(() => {
     if (queues.get(agentId) === next) queues.delete(agentId);
   });
 }
 
-let opened = false;
-
-/** The moment the main screen design shows, played live: Kestrel finishing the delegation check. */
+/** The moment the main screen design shows, played live: Kestrel finishing the delegation check. Plays each time the demo opens. */
 export function playOpeningScene() {
-  if (opened || useStore.getState().workspace.kind !== "demo") return;
-  opened = true;
-  enqueue("kestrel", openingScene);
+  if (useStore.getState().workspace.kind !== "demo") return;
+  followDemoTask(OPENING_TASK);
+  enqueue("kestrel", async () => {
+    try {
+      await openingScene();
+    } finally {
+      taskEnded(OPENING_TASK);
+    }
+  });
 }
+
+/** The chat item of the task Kestrel works on in the opening scene. */
+const OPENING_TASK = "k1";
 
 async function openingScene() {
   const kestrel = new Script("kestrel");
   const moth = new Script("moth");
-  await sleep(1200);
+  await kestrel.pause(1200);
 
   const mothReads = moth.read(ROUTER, 15, 16);
   await kestrel.edit(
@@ -239,14 +291,23 @@ async function openingScene() {
   await mothReads;
   moth.status("queued");
 
-  kestrel.handoff(
+  const handed = kestrel.handoff(
     "moth",
     "Update docs/permissions.md to describe delegation rules once router.ts lands.",
     "Moth accepted. Queued until the tests pass.",
   );
   await kestrel.pause(600);
   const passed = await kestrel.run("npm test -- router", PASSING, "3 passed");
-  if (passed) enqueue("moth", () => mothWritesDocs(moth));
+  if (passed) {
+    enqueue("moth", async () => {
+      taskStarted(handed);
+      try {
+        await mothWritesDocs(moth);
+      } finally {
+        taskEnded(handed);
+      }
+    });
+  }
 
   await kestrel.say("The check is in and all three router tests pass. I'd like to commit it.");
   const committed = await kestrel.run(
@@ -264,7 +325,7 @@ async function openingScene() {
 }
 
 async function mothWritesDocs(moth: Script) {
-  await sleep(800);
+  await moth.pause(800);
   moth.status("working");
   await moth.say("Kestrel's tests pass, so I'm starting on the delegation docs.");
   await moth.read(DOCS, 7, 9);
@@ -280,38 +341,56 @@ async function mothWritesDocs(moth: Script) {
 
 // ---- Messages from the user ----
 
-/** Sends the user's message to a placeholder agent, queued behind anything it is doing. */
-export function sendToAgent(agentId: string, text: string, asTask: boolean) {
-  pushChat(agentId, { kind: "user", id: uid("u"), text, asTask });
+/**
+ * Sends the user's message to a placeholder agent, queued behind anything it
+ * is doing. As a task, it becomes one (or is linked to `taskId`). Returns the
+ * message's id.
+ */
+export function sendToAgent(agentId: string, text: string, asTask: boolean, taskId?: string): string {
+  const id = uid("u");
+  pushChat(agentId, { kind: "user", id, text, asTask });
+  if (asTask) linkTaskMessage(agentId, id, text, taskId);
   if (queues.has(agentId)) {
     pushChat(agentId, { kind: "note", id: uid("n"), text: `Queued until ${agentById(agentId)?.name} finishes.` });
   }
-  enqueue(agentId, () => respond(agentId, text, asTask));
+  enqueue(agentId, async () => {
+    let worked = false;
+    try {
+      worked = await respond(agentId, text, asTask, id);
+    } finally {
+      taskEnded(id, worked);
+    }
+  });
+  return id;
 }
 
-async function respond(agentId: string, text: string, asTask: boolean) {
+/** Plays out a message; false when the placeholder did nothing with it. */
+async function respond(agentId: string, text: string, asTask: boolean, messageId: string): Promise<boolean> {
   const s = new Script(agentId);
   s.status("working");
-  await sleep(500);
+  await s.pause(500);
   if (useStore.getState().workspace.kind !== "demo") {
     await s.say(
       "I'm a placeholder agent, so I won't touch a real project. Open the demo project to watch me work.",
     );
-    return s.done();
+    s.done();
+    return false;
   }
   if (!asTask) {
     await s.say(
       "I'm a placeholder, so I can only act out a scripted task. Send this as a Task to watch me read, edit and run commands under the settings you gave me.",
     );
-    return s.done();
+    s.done();
+    return false;
   }
+  taskStarted(messageId);
 
   const notes = "docs/notes.md";
   await s.say(`On it. I'll note "${text.slice(0, 80)}" in ${notes} and run the tests.`);
   await s.read("README.md", 1, 4);
   let existing = "";
   try {
-    existing = await getBackend().read(notes);
+    existing = await s.files.read(notes);
   } catch {
     existing = "";
   }
@@ -321,7 +400,8 @@ async function respond(agentId: string, text: string, asTask: boolean) {
     : await s.edit(notes, "", `# Notes\n\n${line}`);
   if (!edited) {
     await s.say(`I couldn't edit ${notes}. The activity log above says why.`);
-    return s.done();
+    s.done();
+    return true;
   }
   const tested = await s.run("npm test", PASSING, "3 passed");
   await s.say(
@@ -330,4 +410,5 @@ async function respond(agentId: string, text: string, asTask: boolean) {
       : `I added a line to ${notes}, but I wasn't allowed to run the tests.`,
   );
   s.done();
+  return true;
 }

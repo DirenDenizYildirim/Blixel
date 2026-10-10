@@ -21,7 +21,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ignore = "0.4"
 agent-client-protocol = { version = "3.1", features = ["process"] }
-rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
+# Saved data (store/), with a keyed check on rows that grant agents anything,
+# whose key comes from the OS (the getrandom version Tauri already uses).
+rusqlite = { version = "0.37", features = ["bundled"] }
+hmac = "0.12"
+getrandom = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }
 axum = "0.8"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

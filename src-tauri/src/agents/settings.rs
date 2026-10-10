@@ -83,6 +83,9 @@ pub struct AgentConfig {
     /// instructions, a smaller edit area, more paths that always ask.
     #[serde(default)]
     pub rule_packs: Vec<RulePack>,
+    /// Its access to each connector, by connector id; a connector not listed is Off.
+    #[serde(default)]
+    pub connectors: std::collections::HashMap<String, Setting>,
     /// The model id the program takes, e.g. "sonnet".
     pub model: String,
     /// Thinking effort: "low", "medium" or "high".
@@ -173,6 +176,20 @@ pub enum EditCheck {
 }
 
 impl AgentConfig {
+    /// For settings whose saved record was changed outside the app: every
+    /// tool's Allow becomes Ask, and every connector Off, since an entry
+    /// there may have been added or widened and only the user knows which.
+    pub fn lower_untrusted(&mut self) {
+        for tool in [Tool::Read, Tool::Edit, Tool::Run, Tool::Commit, Tool::Push] {
+            if self.permissions.get(tool) == Setting::Allow {
+                self.permissions.set(tool, Setting::Ask);
+            }
+        }
+        for setting in self.connectors.values_mut() {
+            *setting = Setting::Off;
+        }
+    }
+
     /// Applies the agent's own area and every attached rule pack. Packs only
     /// narrow: an edit must be inside every area, and any protection asks.
     pub fn edit_check(&self, rel: &Path) -> EditCheck {
@@ -212,6 +229,7 @@ mod tests {
                 push: Setting::Off,
             },
             edit_paths: edit_paths.into(),
+            connectors: Default::default(),
             rule_packs,
             model: "test".into(),
             effort: "medium".into(),
@@ -256,6 +274,18 @@ mod tests {
         let area = RulePack { edit_area: "docs/**".into(), ..pack("Area\u{200B}", "") };
         let c = config("", vec![pack("Evil\u{202E}\nlabel", ""), area]);
         assert_eq!(c.edit_check(Path::new("src/a.rs")), EditCheck::Outside(Some("Area".into())));
+    }
+
+    #[test]
+    fn lowering_asks_for_every_tool_and_turns_connectors_off() {
+        let mut c = config("", vec![]);
+        c.connectors.insert("c1".into(), Setting::Allow);
+        c.connectors.insert("c2".into(), Setting::Ask);
+        c.connectors.insert("c3".into(), Setting::Off);
+        c.lower_untrusted();
+        assert_eq!((c.permissions.read, c.permissions.edit, c.permissions.run), (Setting::Ask, Setting::Ask, Setting::Ask));
+        assert_eq!((c.permissions.commit, c.permissions.push), (Setting::Off, Setting::Off), "Off stays Off");
+        assert!(c.connectors.values().all(|s| *s == Setting::Off), "{:?}", c.connectors);
     }
 
     #[test]
