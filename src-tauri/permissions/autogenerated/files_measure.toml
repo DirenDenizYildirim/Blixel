@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-files-measure"
+description = "Enables the files_measure command without any pre-configured scope."
+commands.allow = ["files_measure"]
+
+[[permission]]
+identifier = "deny-files-measure"
+description = "Denies the files_measure command without any pre-configured scope."
+commands.deny = ["files_measure"]

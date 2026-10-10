@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connectors-list"
+description = "Enables the connectors_list command without any pre-configured scope."
+commands.allow = ["connectors_list"]
+
+[[permission]]
+identifier = "deny-connectors-list"
+description = "Denies the connectors_list command without any pre-configured scope."
+commands.deny = ["connectors_list"]

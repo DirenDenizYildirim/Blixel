@@ -1,0 +1,75 @@
+/* The Tasks view: the selected agent's tasks, then the ones for anyone.
+   It sits in a card like the shell's (.shell-card, .shell-head). */
+.tasks-card { container-type: inline-size; }
+/* The agent's name gives way before the head's buttons do. */
+.tasks-card .shell-head .who-name { flex: 0 1 auto; min-width: 0; }
+.tasks-count { flex: none; font-size: 12px; color: var(--muted); }
+.tasks-body {
+  flex: 1 1 0; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 8px 10px; font-size: 12px; line-height: 18px;
+}
+.tasks-group { display: flex; flex-direction: column; gap: 2px; }
+.tasks-group-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px; padding: 6px 8px 2px; border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.tasks-empty { padding: 4px 8px; color: var(--muted); }
+.tasks-done-toggle {
+  display: flex; align-items: center; gap: 6px; align-self: flex-start;
+  height: 24px; padding: 0 8px; background: transparent; border: 0; border-radius: 6px;
+  color: var(--muted); font-size: 12px;
+}
+.tasks-done-toggle:hover { background: var(--sel); }
+
+.task { display: flex; flex-direction: column; gap: 2px; padding: 3px 4px 3px 8px; border-radius: 8px; }
+.task:hover, .task:focus-within { background: var(--sel); }
+.task-line { display: flex; align-items: center; gap: 10px; min-height: 26px; }
+.task-chip {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-width: 54px; height: 20px; padding: 0 7px;
+  border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--muted);
+}
+.task-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+.task-chip[data-status="doing"] { color: var(--ok); border-color: currentColor; }
+.task-chip[data-status="check"] { color: var(--warn); border-color: currentColor; }
+.task-title {
+  flex: 1 1 auto; min-width: 0; padding: 0;
+  background: none; border: 0; color: var(--strong); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.task[data-status="done"] .task-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.task-give { flex: none; white-space: nowrap; }
+.task-more { flex: none; opacity: 0; }
+.task:hover .task-more, .task:focus-within .task-more, .task-more[aria-expanded="true"] { opacity: 1; }
+/* Lines under a task start where its title does. */
+.task-sub { padding-left: 64px; color: var(--muted); overflow-wrap: anywhere; }
+.task-check { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding-top: 2px; padding-bottom: 4px; color: var(--fg); }
+.task-check-answers { display: flex; gap: 6px; }
+.task-flag { color: var(--warn); }
+.task-notes { white-space: pre-wrap; color: var(--fg); }
+.btn.tiny { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+
+.task-add { padding: 2px 4px 4px 8px; }
+.task-edit { gap: 6px; padding: 6px 8px; background: var(--sel); }
+.task-input {
+  width: 100%; height: 30px; padding: 0 10px;
+  background: var(--code); border: 1px solid var(--border); border-radius: 8px; color: var(--fg);
+}
+.task-input.area { height: auto; padding: 6px 10px; resize: vertical; line-height: 18px; }
+.task-edit-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* The message box's tasks button, with the agent's open-task count. */
+.tasks-btn { position: relative; }
+.tasks-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+  font-size: 10px; line-height: 16px; font-weight: 700; text-align: center;
+}
+
+/* In a narrow view, lines under a task start at its chip, not its title. */
+@container (max-width: 340px) {
+  .task-sub { padding-left: 4px; }
+  .task-give-to, .head-count { display: none; }
+}

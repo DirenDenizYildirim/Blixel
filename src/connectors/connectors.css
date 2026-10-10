@@ -1,0 +1,214 @@
+/* The Connectors page, the add pop-up and the agent form's connector rows.
+   Laid out like the Mods page; colours come only from the theme tokens.
+   Below 900px of page width the side column moves under the main one.
+   This file loads before styles.css, so a rule changing one of its classes
+   (.panel, .tool-row, .btn) needs a second class. */
+
+.conn-page { flex: 1 1 auto; min-width: 0; display: flex; container-type: inline-size; container-name: conn; }
+.conn-layout { flex: 1 1 auto; min-width: 0; display: flex; }
+.conn-main {
+  flex: 1 1 560px; min-width: 0; overflow-y: auto; scrollbar-gutter: stable;
+  padding: 26px 28px 32px; display: flex; flex-direction: column; gap: 16px;
+}
+.conn-aside {
+  flex: 0 0 320px; min-width: 0; overflow-y: auto;
+  padding: 26px 20px 32px; display: flex; flex-direction: column; gap: 18px;
+  border-left: 1px solid var(--line);
+}
+@container conn (max-width: 899px) {
+  .conn-layout { flex-direction: column; overflow-y: auto; }
+  .conn-main, .conn-aside { flex: none; overflow: visible; }
+  .conn-main { padding-bottom: 8px; }
+  .conn-aside {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 18px 16px;
+    margin: 0 28px; padding: 22px 0 32px; border-left: 0; border-top: 1px solid var(--line);
+  }
+  .conn-back { justify-self: start; }
+}
+
+.conn-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 16px; }
+.conn-head-text { flex: 1 1 280px; min-width: 0; }
+.conn-head h1 { margin: 0; font-size: 22px; line-height: 30px; font-weight: 600; color: var(--strong); }
+.conn-banner {
+  padding: 10px 14px 10px 16px; font-size: 13px; line-height: 20px;
+  background: var(--card); border: 1px solid var(--warn); border-radius: 12px;
+}
+.conn-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.conn-filter {
+  flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 10px;
+  height: 36px; padding: 0 12px; background: var(--code); border: 1px solid var(--border); border-radius: 8px; cursor: text;
+}
+.conn-filter:focus-within { border-color: var(--muted); }
+.conn-filter input {
+  flex: 1 1 auto; min-width: 0; height: 100%; padding: 0;
+  background: transparent; border: 0; color: var(--strong); outline: none; appearance: none;
+}
+.conn-filter input::-webkit-search-cancel-button { display: none; }
+.conn-quiet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 2px; font-size: 12px; color: var(--muted); }
+.conn-page code, .conn-pop code {
+  padding: 0 4px; font-family: inherit; font-size: 0.92em; background: var(--sel); border-radius: 4px; color: var(--strong);
+}
+
+/* A connector's picture: pixel art on a tile washed with its colour. */
+.conn-tile {
+  flex: none; display: grid; place-items: center;
+  background: color-mix(in oklch, var(--tint) 14%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--tint) 22%, var(--line));
+  border-radius: 16px;
+}
+.conn-tile svg { image-rendering: pixelated; }
+
+/* ---- A connector ---- */
+.panel.conn-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 16px 18px; }
+.panel.conn-card[data-step="remove"] { border-color: var(--danger-line); }
+.conn-top { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
+.conn-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.conn-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.conn-name { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--strong); overflow-wrap: anywhere; }
+.conn-page .conn-slug { font-size: 11px; }
+.conn-tag {
+  align-self: center; padding: 0 7px; font-size: 11px; line-height: 17px;
+  border: 1px solid var(--line); border-radius: 9px; color: var(--muted);
+}
+.conn-where { font-size: 13px; color: var(--fg); }
+.conn-reason { font-size: 12px; line-height: 18px; color: var(--fg); overflow-wrap: anywhere; }
+.conn-reason[data-tone="error"] { color: var(--danger-fg); }
+.conn-reason[data-tone="warn"] { color: var(--warn); }
+.conn-fold {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; margin-top: 4px; padding: 0 10px;
+  background: transparent; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px;
+}
+.conn-fold:hover { color: var(--fg); border-color: var(--border); }
+.conn-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 120px; }
+.conn-controls { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.conn-state, .conn-state-inline { font-size: 12px; line-height: 16px; color: var(--muted); }
+.conn-state { padding: 0 10px; line-height: 24px; border: 1px solid var(--line); border-radius: 12px; white-space: nowrap; }
+.conn-state[data-tone="ok"], .conn-state-inline[data-tone="ok"] { color: var(--ok); }
+.conn-state[data-tone="warn"], .conn-state-inline[data-tone="warn"] { color: var(--warn); border-color: var(--warn); }
+.conn-state[data-tone="error"], .conn-state-inline[data-tone="error"] { color: var(--danger-fg); border-color: var(--danger-line); }
+.conn-side .btn { height: 28px; padding: 0 12px; font-size: 12px; }
+
+/* Its tools. */
+.conn-tools { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.conn-tools li { display: flex; flex-direction: column; gap: 2px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12px; line-height: 18px; }
+.conn-tool-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.conn-tool-text { color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.conn-tool-text.full { display: block; white-space: pre-wrap; }
+.conn-tool-fold {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; padding: 0;
+  background: none; border: 0; color: var(--muted); font-size: 11px; line-height: 18px;
+}
+.conn-tool-fold:hover { color: var(--fg); }
+/* A tool's input schema: all of it reachable, wrapped, in its own scroll. */
+.conn-schema {
+  margin: 2px 0 0; padding: 8px 10px; max-height: 260px; overflow: auto;
+  background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--fg);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.conn-hint-chip { padding: 0 7px; font-size: 11px; line-height: 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.conn-hint-chip[data-tone="ok"] { color: var(--ok); }
+.conn-hint-chip[data-tone="warn"] { color: var(--warn); border-color: var(--warn); }
+
+/* Approving tools and removing, in place in the card. */
+.conn-review, .conn-confirm {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px;
+  background: var(--code); border: 1px solid var(--warn); border-radius: 12px; font-size: 13px; line-height: 20px;
+}
+.conn-confirm { border-color: var(--danger-line); }
+.conn-confirm-title { font-weight: 600; color: var(--strong); }
+.conn-page .btn.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger-fg); font-weight: 600; }
+
+/* Who may use it. */
+.conn-access { display: flex; flex-direction: column; padding-top: 10px; border-top: 1px solid var(--line); }
+.conn-access-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding-bottom: 6px; }
+.conn-access-head .label + .label { color: var(--warn); }
+.conn-access-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 0; }
+.conn-access-row + .conn-access-row { border-top: 1px solid var(--line); }
+.conn-agent { flex: 1 1 auto; min-width: 0; color: var(--strong); }
+
+/* ---- No connectors yet ---- */
+.panel.conn-empty { display: flex; flex-direction: column; gap: 6px; padding: 20px 22px 22px; font-size: 13px; line-height: 20px; }
+.conn-empty-title { font-size: 15px; line-height: 22px; font-weight: 600; color: var(--strong); }
+.conn-empty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-top: 12px; }
+.conn-empty-item {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 6px 10px;
+  background: transparent; border: 1px solid var(--line); border-radius: 12px;
+}
+.conn-empty-item:hover, .conn-pick-item:hover { border-color: var(--border); background: var(--sel); }
+
+/* ---- Side column ---- */
+.conn-aside-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.conn-counts { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.conn-counts > div { display: flex; flex-direction: column; padding: 10px 14px 12px; min-width: 0; }
+.conn-counts > div + div { border-left: 1px solid var(--line); }
+.conn-count-n { font-size: 22px; line-height: 30px; font-weight: 600; color: var(--strong); }
+.conn-list {
+  display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px; list-style: none; font-size: 13px; line-height: 20px;
+}
+.conn-list-text { display: block; color: var(--fg); }
+.conn-list-intro { color: var(--muted); font-size: 12px; line-height: 18px; }
+.conn-list-row { display: flex; align-items: flex-start; gap: 10px; }
+.conn-list-mark { flex: none; display: flex; align-items: center; height: 20px; color: var(--ok); }
+.conn-access-word { flex: none; width: 6ch; font-weight: 600; color: var(--strong); }
+.conn-list-hint { color: var(--fg); }
+
+/* ---- The add pop-up ---- */
+.conn-backdrop {
+  position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 24px 16px;
+  background: color-mix(in srgb, var(--side) 55%, transparent);
+}
+.conn-pop {
+  width: min(620px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  overflow: hidden;
+}
+.conn-pop-step { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.conn-pop-head { display: flex; align-items: flex-start; gap: 14px; padding: 18px 16px 12px 20px; }
+.conn-pop-head h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--strong); }
+.conn-pop-sub { font-size: 12px; line-height: 18px; color: var(--muted); }
+.conn-pop-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 20px 18px; }
+.conn-pop-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px;
+  padding: 12px 16px 14px 20px; border-top: 1px solid var(--line);
+}
+.conn-pop-problem { flex: 1 1 200px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.conn-pop-note { font-size: 12px; line-height: 18px; color: var(--warn); }
+.conn-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.conn-pick-item {
+  display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 8px; min-width: 0;
+  background: transparent; border: 1px solid var(--line); border-radius: 12px; text-align: left;
+}
+.conn-pick-text { min-width: 0; display: flex; flex-direction: column; }
+.conn-pick-name { font-weight: 600; color: var(--strong); }
+.conn-pick-blurb { font-size: 12px; line-height: 17px; color: var(--muted); }
+.conn-slug-field { flex: 0 1 220px; min-width: 160px; }
+.conn-slug-fixed { display: flex; align-items: center; color: var(--muted); }
+.conn-hint { font-size: 12px; line-height: 18px; color: var(--muted); }
+.conn-fields { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.conn-fields > .tool-row { padding: 6px 0 0; }
+.conn-command { flex: 1 1 140px; }
+.conn-var { display: flex; align-items: center; gap: 8px; }
+.conn-var-name { flex: 0 1 180px; min-width: 0; }
+.conn-var-value { flex: 1 1 auto; min-width: 0; }
+.conn-secret {
+  flex: none; height: 30px; padding: 0 10px; font-size: 12px;
+  background: transparent; border: 1px solid var(--line); border-radius: 15px; color: var(--muted);
+}
+.conn-secret[aria-pressed="true"] { color: var(--strong); border-color: var(--accent); background: var(--sel); }
+.conn-add-row { padding-left: 0; }
+.conn-warn {
+  padding: 10px 12px; font-size: 12px; line-height: 18px; color: var(--fg);
+  border: 1px solid var(--warn); border-radius: 10px;
+}
+
+/* ---- In the agent form ---- */
+.agent-conns { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.agent-conns-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding-bottom: 6px; }
+.agent-conns-head > .link-btn { flex: none; white-space: nowrap; line-height: 20px; }
+.agent-conns-empty { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; padding: 4px 0 8px; }
+/* The tile and text stay together; the row wraps the access buttons under them when narrow. */
+.agent-conn-who { flex: 1 1 240px; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.agent-conn-who > .tool-text { flex: 1 1 auto; }
+.agent-conn-who > .conn-tile { border-radius: 9px; }

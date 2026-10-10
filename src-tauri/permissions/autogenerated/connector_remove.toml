@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connector-remove"
+description = "Enables the connector_remove command without any pre-configured scope."
+commands.allow = ["connector_remove"]
+
+[[permission]]
+identifier = "deny-connector-remove"
+description = "Denies the connector_remove command without any pre-configured scope."
+commands.deny = ["connector_remove"]

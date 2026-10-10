@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-store-status"
+description = "Enables the store_status command without any pre-configured scope."
+commands.allow = ["store_status"]
+
+[[permission]]
+identifier = "deny-store-status"
+description = "Denies the store_status command without any pre-configured scope."
+commands.deny = ["store_status"]

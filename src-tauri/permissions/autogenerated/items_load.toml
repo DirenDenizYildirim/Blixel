@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-items-load"
+description = "Enables the items_load command without any pre-configured scope."
+commands.allow = ["items_load"]
+
+[[permission]]
+identifier = "deny-items-load"
+description = "Denies the items_load command without any pre-configured scope."
+commands.deny = ["items_load"]

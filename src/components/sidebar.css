@@ -1,0 +1,164 @@
+/* The sidebar's newer parts and its pop-ups: the project switcher, the agent
+   rows' menus, the footer icons and the New pop-up. Theme tokens only. */
+
+/* The head, the switcher and the foot stay put; the middle scrolls. */
+.sidebar.nav-full, .sidebar.nav-rail { overflow: hidden; }
+.side-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; padding-bottom: 12px;
+}
+.side-item[aria-expanded="true"][aria-haspopup] { background: var(--sel); color: var(--strong); }
+.side-empty { padding: 4px 10px 8px 37px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.side-empty .link-btn { padding: 0; font-size: 12px; }
+
+/* ---- Project switcher ---- */
+.switcher { padding: 0 10px 10px; }
+.project-switch {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 0 10px 0 8px;
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  color: var(--strong); text-align: left;
+}
+.project-switch:hover, .project-switch[aria-expanded="true"] { background: var(--sel); }
+.project-switch-name { flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-tile {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: var(--sel); color: var(--accent); font-size: 12px; font-weight: 700; line-height: 1;
+}
+.project-switch:hover .project-tile, .project-switch[aria-expanded="true"] .project-tile { background: var(--line); }
+.nav-rail .project-tile { width: 26px; height: 26px; }
+
+/* ---- Agent rows: the "⋯" takes the status's place on hover or focus ---- */
+.agent-item { position: relative; }
+.agent-more {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  background: var(--sel); border: 0; border-radius: 8px; color: var(--muted);
+  opacity: 0; pointer-events: none;
+}
+.agent-item:hover .agent-more, .agent-item:focus-within .agent-more, .agent-item[data-open] .agent-more { opacity: 1; pointer-events: auto; }
+.agent-item:hover .agent-row .status, .agent-item:focus-within .agent-row .status, .agent-item[data-open] .agent-row .status { display: none; }
+.agent-item[data-open] .agent-row { background: var(--sel); }
+/* The text ends before the button rather than running under it. */
+.agent-item:hover .agent-row-text, .agent-item:focus-within .agent-row-text, .agent-item[data-open] .agent-row-text { padding-right: 30px; }
+.agent-more:hover, .agent-more[aria-expanded="true"] { background: var(--line); color: var(--strong); }
+/* Settings changed outside the app: a mark beside the name, and on the rail's avatar. */
+.trust-mark { flex: none; display: flex; align-items: center; }
+.rail-trust {
+  position: absolute; right: 1px; top: 1px; display: flex; padding: 1px;
+  background: var(--side); border-radius: 50%;
+}
+
+/* ---- Foot: Mods, Connectors, Theme, Settings ---- */
+.foot-row { flex: none; display: flex; align-items: center; gap: 2px; padding: 8px 12px 14px; }
+.foot-btn[aria-expanded="true"] { background: var(--sel); color: var(--strong); }
+.foot-btn:hover { color: var(--fg); }
+.rail-scroll {
+  flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.rail-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0 14px; }
+.rail-btn { color: var(--fg); }
+.rail-foot .rail-btn { color: var(--muted); }
+.rail-foot .rail-btn:hover, .rail-foot .rail-btn[aria-current], .rail-foot .rail-btn[aria-expanded="true"],
+.rail-btn[aria-expanded="true"] { background: var(--sel); color: var(--strong); }
+.nav-rail > .rail-btn { flex: none; margin-bottom: 6px; }
+
+/* ---- Pop-ups ---- */
+.pop {
+  position: fixed; left: 0; top: 0; z-index: 45;
+  max-height: calc(100vh - 16px); overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+.pop:focus { outline: none; }
+.pop-menu { display: flex; flex-direction: column; gap: 2px; min-width: 200px; max-width: min(320px, calc(100vw - 16px)); padding: 6px; font-size: 13px; }
+.pop-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 32px; padding: 0 10px;
+  background: transparent; border: 0; border-radius: 8px; color: var(--fg); text-align: left;
+}
+.pop-item:hover, .pop-item:focus-visible { background: var(--sel); outline: none; }
+.pop-item[aria-checked="true"], .pop-item[aria-current] { color: var(--strong); }
+.pop-item.danger, .pop-mini.danger { color: var(--danger-fg); }
+.pop-check { flex: none; display: flex; width: 14px; color: var(--accent); }
+.pop-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
+.pop-label { padding: 4px 10px 2px; font-size: 11px; color: var(--muted); }
+.pop-note { padding: 4px 10px 6px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.pop-mini {
+  height: 28px; padding: 0 10px;
+  background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 12px;
+}
+.pop-mini:hover, .pop-mini:focus-visible { background: var(--sel); }
+.pop-mini.danger { border-color: var(--danger-line); }
+.pop-mini.danger:hover { background: var(--danger-bg); }
+
+.project-pop { width: 300px; }
+.project-line { display: flex; align-items: center; gap: 2px; }
+.pop-item.two-line { padding-top: 5px; padding-bottom: 5px; }
+.project-open { flex: 1 1 auto; min-width: 0; }
+.project-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 18px; }
+.project-path { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-path.missing { color: var(--warn); }
+.project-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.project-more {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  background: transparent; border: 0; border-radius: 8px; color: var(--muted);
+}
+.project-more:hover, .project-more[aria-expanded="true"] { background: var(--sel); color: var(--strong); }
+.project-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 8px 34px; }
+.project-rename { width: 100%; height: 34px; }
+.theme-pop { min-width: 190px; }
+
+/* ---- The New pop-up ---- */
+.new-pop { width: min(380px, calc(100vw - 16px)); display: flex; flex-direction: column; }
+.new-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 4px; }
+.new-tabs button[aria-selected="true"] { background: var(--line); color: var(--strong); }
+.new-agent-link { height: 30px; padding: 0 6px; border-radius: 8px; font-size: 13px; }
+.new-agent-link:hover { background: var(--sel); }
+.new-panel[hidden] { display: none; }
+.new-body { display: flex; flex-direction: column; gap: 14px; padding: 12px 16px 16px; }
+.new-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.new-field > legend { padding: 0; margin-bottom: 6px; }
+.new-note { margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.label-aside { margin-left: 4px; opacity: 0.8; }
+.where-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.where-choice { flex: none; display: flex; align-items: center; gap: 8px; min-width: 128px; font-size: 13px; }
+.where-choice input { margin: 0; accent-color: var(--accent); }
+.where-btn {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  height: 30px; padding: 0 10px;
+  background: var(--code); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 12px;
+}
+.where-btn:hover { border-color: var(--muted); }
+.where-result { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bring-group { display: flex; flex-direction: column; gap: 6px; }
+.bring-from { font-size: 11px; color: var(--muted); }
+.chip.small { height: 30px; gap: 6px; padding: 0 10px 0 6px; font-size: 12px; }
+.chip.small.plain { padding: 0 10px; }
+.chip[aria-disabled="true"] { opacity: 0.6; }
+.btn.small { height: 30px; padding: 0 12px; font-size: 12px; }
+.file-chip {
+  display: flex; align-items: center; gap: 4px; max-width: 100%;
+  height: 28px; padding: 0 4px 0 10px;
+  border: 1px solid var(--border); border-radius: 14px; font-size: 12px; color: var(--strong);
+}
+.file-chip button {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; border: 0; border-radius: 50%; color: var(--muted);
+}
+.file-chip button:hover { background: var(--sel); color: var(--fg); }
+.new-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.new-problem, .new-error { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.new-error { color: var(--danger-fg); }
+
+/* ---- Agent form: changed outside the app, and removing it ---- */
+.form-warning {
+  padding: 10px 14px; font-size: 13px; line-height: 20px; color: var(--strong);
+  background: var(--card); border: 1px solid var(--warn); border-radius: 12px;
+}
+.form-remove { align-self: center; margin-top: 4px; padding: 4px 8px; color: var(--danger-fg); font-size: 12px; }

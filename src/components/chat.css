@@ -1,0 +1,31 @@
+/* Chat additions: activity lines that fold open. */
+.activity-fold {
+  display: flex; align-items: center; gap: 6px; padding: 0;
+  background: none; border: 0; color: inherit; font-size: 12px; text-align: left;
+}
+.activity-fold:hover { color: var(--strong); }
+.activity-detail {
+  margin: 2px 0 4px 16px; padding: 6px 10px; max-height: 180px; overflow: auto;
+  background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 11px; line-height: 17px; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* A narrow chat keeps every button of the message box inside it. */
+.composer { container-type: inline-size; }
+@container (max-width: 300px) {
+  .composer .composer-bar { gap: 4px; }
+  .composer-bar .square-btn { width: 32px; height: 32px; }
+  .composer-bar .seg button { height: 28px; padding: 0 7px; }
+}
+
+/* Above the chat while the agent's saved settings wait for the user's review. */
+.review-card {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  margin: 0 20px 8px; padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--warn); border-radius: 12px;
+  font-size: 12px; line-height: 18px; color: var(--strong);
+}
+.review-card > span { flex: 1 1 200px; }
+.review-card .btn { height: 30px; padding: 0 12px; font-size: 12px; }
+/* A long run of activity is split into blocks of a few hundred lines; they read as one log. */
+.activity + .activity { margin-top: -10px; }

@@ -1,0 +1,18 @@
+/* The app's yes-or-no questions: a small card over a dimmed window. */
+.ask-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: rgb(0 0 0 / 0.32);
+}
+.ask-card {
+  width: min(440px, 100%); display: flex; flex-direction: column; gap: 8px;
+  padding: 18px 18px 16px; background: var(--card);
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 10px 36px rgb(0 0 0 / 0.35);
+}
+.ask-title { font-weight: 600; color: var(--strong); }
+.ask-detail { font-size: 12px; line-height: 20px; color: var(--muted); overflow-wrap: anywhere; }
+.ask-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.ask-actions .btn { height: 32px; }
+.btn.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger-fg); font-weight: 600; }
+.btn.danger:hover:not(:disabled) { background: var(--danger-bg); filter: brightness(1.1); }

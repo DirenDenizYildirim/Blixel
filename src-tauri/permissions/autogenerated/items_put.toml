@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-items-put"
+description = "Enables the items_put command without any pre-configured scope."
+commands.allow = ["items_put"]
+
+[[permission]]
+identifier = "deny-items-put"
+description = "Denies the items_put command without any pre-configured scope."
+commands.deny = ["items_put"]
