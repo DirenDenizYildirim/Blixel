@@ -90,7 +90,18 @@ pub struct AgentConfig {
     pub model: String,
     /// Thinking effort: "low", "medium" or "high".
     pub effort: String,
+    /// The program that runs it: "claude-code" (also when empty), or
+    /// `STAND_IN`, which only debug builds run.
+    #[serde(default)]
+    pub program: String,
+    /// The most it may spend in a day, in US dollars, as the user wrote it
+    /// ("" for no limit); read with `usage::parse_limit`.
+    #[serde(default)]
+    pub daily_limit: String,
 }
+
+/// The program value for the stand-in agent (`crate::stand_in`).
+pub const STAND_IN: &str = "stand-in";
 
 /// A rule pack's label is cut to this many characters wherever it is shown.
 const MAX_LABEL_CHARS: usize = 60;
@@ -233,6 +244,8 @@ mod tests {
             rule_packs,
             model: "test".into(),
             effort: "medium".into(),
+            program: String::new(),
+            daily_limit: String::new(),
         }
     }
 

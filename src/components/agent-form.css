@@ -1,0 +1,30 @@
+/* Agent form additions: the daily limit's line under its field, and how to
+   script the stand-in. The form's page, panels and fields are in styles.css. */
+
+.limit-today { font-size: 12px; line-height: 18px; color: var(--fg); }
+.limit-today[data-level="near"] { color: var(--warn); }
+.limit-today[data-level="at"], .limit-today[data-level="bad"] { color: var(--danger-fg); }
+.hint-line.limit-hint { margin-bottom: 0; line-height: 18px; }
+
+/* The stand-in's instructions, folded until asked for. */
+.standin-fold {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  background: transparent; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px;
+}
+.standin-fold:hover { color: var(--fg); border-color: var(--border); }
+/* Ligatures would draw <<<, === and >>> as symbols; here they must read as typed. */
+.standin-body {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px 14px;
+  background: var(--code); border: 1px solid var(--line); border-radius: 10px;
+  font-variant-ligatures: none;
+}
+.standin-steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 18px; }
+/* The instruction and what it does side by side, or one over the other where there is no room. */
+.standin-steps li { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.standin-steps code { flex: 0 0 31ch; font: inherit; color: var(--strong); }
+.standin-steps span { flex: 1 1 220px; min-width: 0; color: var(--muted); }
+.standin-example {
+  margin: 0; padding: 8px 10px; overflow-x: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 12px; line-height: 18px; color: var(--fg); white-space: pre;
+}

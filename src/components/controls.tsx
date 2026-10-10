@@ -43,8 +43,11 @@ export function Switch(props: { label: string; checked: boolean; onChange: (chec
   );
 }
 
+/** An agent's status in words: "needs you" for one waiting on the user, "at limit" for one that spent its daily limit. */
+export const statusText = (status: string) => (status === "waiting" ? "needs you" : status === "limited" ? "at limit" : status);
+
 export function StatusLabel({ status }: { status: string }) {
-  const text = status === "waiting" ? "needs you" : status;
+  const text = statusText(status);
   return (
     <span className="status" data-status={status}>
       <span className="status-text">{text}</span>

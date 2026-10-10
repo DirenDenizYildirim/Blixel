@@ -21,8 +21,10 @@ import {
   useStore,
   writeShell,
 } from "./store";
+import { notSent } from "./real-agent";
 import { addHandedTask, followDemoTask, linkTaskMessage, taskEnded, taskStarted } from "./tasks";
-import type { ActivityVerb, ChatItem, PermissionState, ToolId } from "./types";
+import type { ActivityVerb, Agent, ChatItem, PermissionState, ToolId } from "./types";
+import { formatUsd, limitOf, reportUsage, turnStarted } from "./usage";
 
 type Answer = Exclude<PermissionState, "open">;
 
@@ -90,6 +92,20 @@ class Script {
     this.check();
   }
 
+  /** A made-up cost for a step, so the demo shows spending. Placeholders cost nothing anywhere else. */
+  charge(usd: number) {
+    this.check();
+    if (useStore.getState().projectId !== "demo") return;
+    const usage = useStore.getState().usage[this.agentId] ?? { today: 0, turn: 0 };
+    reportUsage(this.agentId, usage.today + usd, usage.turn + usd);
+  }
+
+  /** The start of a turn: its cost counts from zero. */
+  beginTurn() {
+    this.check();
+    turnStarted(this.agentId);
+  }
+
   /** Streams a reply into the agent's chat. */
   async say(text: string, to: string = this.agentId) {
     this.check();
@@ -101,6 +117,7 @@ class Script {
       await sleep(18);
     }
     patchChat(to, id, { text, streaming: false } as Partial<ChatItem>);
+    this.charge(0.006 + text.length * 0.0001);
   }
 
   log(verb: ActivityVerb, target: string, result: string, live = false, refused = false) {
@@ -135,6 +152,7 @@ class Script {
     hideCaret(this.agentId, path);
     setPresence(this.agentId, null);
     patchActivity(this.agentId, entry, { result: "done", live: false });
+    this.charge(0.011);
     return true;
   }
 
@@ -194,6 +212,7 @@ class Script {
     this.lastPath = path;
     await showAgentEdit({ agentId: this.agentId, path, before: disk, find, replace, replaceAll: false });
     patchActivity(this.agentId, entry, { result: "done", live: false });
+    this.charge(0.024);
     return true;
   }
 
@@ -210,6 +229,7 @@ class Script {
       writeShell(this.agentId, line + "\r\n");
     }
     patchActivity(this.agentId, entry, { result, live: false });
+    this.charge(0.009);
     return true;
   }
 
@@ -224,11 +244,12 @@ class Script {
     return theirs;
   }
 
+  /** The turn ends; at its daily limit the agent rests until the limit is raised (as the core does for real agents). */
   done() {
     this.check();
     if (this.lastPath) hideCaret(this.agentId, this.lastPath);
     setPresence(this.agentId, null);
-    this.status("idle");
+    this.status(atLimit(this.agent) ? "limited" : "idle");
   }
 }
 
@@ -246,6 +267,26 @@ const PASSING = [
 ];
 
 const queues = new Map<string, Promise<void>>();
+
+/** Whether a placeholder has spent its daily limit (only the demo's ever spend anything). */
+function atLimit(agent: Agent) {
+  const limit = limitOf(agent);
+  return limit !== null && (useStore.getState().usage[agent.id]?.today ?? 0) >= limit;
+}
+
+/** The note a refused message gets, worded as the core words it for real agents. */
+function limitNote(agent: Agent) {
+  const spent = useStore.getState().usage[agent.id]?.today ?? 0;
+  return `${agent.name} reached today's limit of ${formatUsd(limitOf(agent) ?? 0)} (${formatUsd(spent)} spent). Raise the limit in its settings, or it can work again tomorrow.`;
+}
+
+/** After the user changed a placeholder's limit: one no longer at it is idle again. */
+export function recheckLimit(agentId: string) {
+  const agent = agentById(agentId);
+  if (!agent?.placeholder) return;
+  if (agent.status === "limited" && !atLimit(agent)) setStatus(agentId, "idle");
+  else if (agent.status === "idle" && atLimit(agent)) setStatus(agentId, "limited");
+}
 
 /** Runs a job after everything the agent is already doing. */
 function enqueue(agentId: string, job: () => Promise<void>) {
@@ -300,6 +341,7 @@ async function openingScene() {
   const passed = await kestrel.run("npm test -- router", PASSING, "3 passed");
   if (passed) {
     enqueue("moth", async () => {
+      moth.beginTurn();
       taskStarted(handed);
       try {
         await mothWritesDocs(moth);
@@ -349,7 +391,15 @@ async function mothWritesDocs(moth: Script) {
 export function sendToAgent(agentId: string, text: string, asTask: boolean, taskId?: string): string {
   const id = uid("u");
   pushChat(agentId, { kind: "user", id, text, asTask });
-  if (asTask) linkTaskMessage(agentId, id, text, taskId);
+  const linked = asTask ? linkTaskMessage(agentId, id, text, taskId) : null;
+  const agent = agentById(agentId);
+  if (agent && atLimit(agent) && !queues.has(agentId)) {
+    // Refused like a real agent at its limit: nothing starts, the message goes back.
+    pushChat(agentId, { kind: "note", id: uid("n"), text: limitNote(agent) });
+    notSent(agentId, id, text, linked !== null && linked !== taskId ? linked : null);
+    if (agent.status !== "limited") setStatus(agentId, "limited");
+    return id;
+  }
   if (queues.has(agentId)) {
     pushChat(agentId, { kind: "note", id: uid("n"), text: `Queued until ${agentById(agentId)?.name} finishes.` });
   }
@@ -367,6 +417,14 @@ export function sendToAgent(agentId: string, text: string, asTask: boolean, task
 /** Plays out a message; false when the placeholder did nothing with it. */
 async function respond(agentId: string, text: string, asTask: boolean, messageId: string): Promise<boolean> {
   const s = new Script(agentId);
+  // A message queued behind the turn that reached the limit is not started: it goes back, as the core does.
+  if (atLimit(s.agent)) {
+    pushChat(agentId, { kind: "note", id: uid("n"), text: limitNote(s.agent) });
+    notSent(agentId, messageId, text, null);
+    s.status("limited");
+    return false;
+  }
+  s.beginTurn();
   s.status("working");
   await s.pause(500);
   if (useStore.getState().workspace.kind !== "demo") {

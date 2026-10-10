@@ -3,9 +3,11 @@ import type { AvatarStyle } from "../avatars/generator";
 
 export type Permission = "off" | "ask" | "allow";
 export type ToolId = "read" | "edit" | "run" | "commit" | "push";
-export type AgentStatus = "idle" | "working" | "waiting" | "queued" | "stopped";
+/** "limited": idle, and at its daily spending limit, so it starts nothing new until the limit is raised or the day ends. */
+export type AgentStatus = "idle" | "working" | "waiting" | "queued" | "stopped" | "limited";
 export type RunsOn = "hosted" | "api-key" | "self-hosted";
-export type Program = "claude-code" | "codex" | "opencode";
+/** "stand-in": a test program that speaks ACP like Claude Code but follows a script; only debug builds of the core run it. */
+export type Program = "claude-code" | "codex" | "opencode" | "stand-in";
 export type Effort = "low" | "medium" | "high";
 
 export interface Agent {
@@ -39,6 +41,7 @@ export interface Agent {
   canGiveTo: string[];
   /** Characters per second when its edits are replayed in the editor. */
   typingSpeed: number;
+  /** Dollars a day, as a plain number ("5", "2.5"), or empty for no limit. The core enforces it. */
   dailyLimit: string;
   whenIdle: "wait" | "pick-up";
   status: AgentStatus;
@@ -124,6 +127,7 @@ export const PROGRAM_LABELS: Record<Program, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
+  "stand-in": "Stand-in (testing)",
 };
 
 export interface ModelChoice {
@@ -137,7 +141,11 @@ export interface ModelChoice {
  * program takes. Once a Claude Code session runs, the list it reports replaces
  * this one; `cargo test -- --ignored` checks these ids against the pinned adapter.
  */
-export const FALLBACK_MODELS: Record<Program, ModelChoice[]> = fallbackModels;
+export const FALLBACK_MODELS: Record<Program, ModelChoice[]> = {
+  ...fallbackModels,
+  // The stand-in has no models; the core reports what it offers after its first session.
+  "stand-in": [{ id: "stand-in", name: "Stand-in" }],
+};
 
 // ---- Projects, tasks, connectors and settings (saved by the core) ----
 
@@ -184,6 +192,8 @@ export interface Task {
   sentItemId: string | null;
   /** Why it needs a look: its agent stopped, was removed, or the app quit while it ran. */
   flag: null | "stopped" | "agent-removed" | "quit";
+  /** Dollars its agent's turns spent on it so far; missing when nothing was. */
+  cost?: number;
 }
 
 /** An environment variable or header of a connector. Secret values live in the keychain and never come back. */

@@ -53,7 +53,7 @@ impl ServerHandler for Stub {
     }
 }
 
-fn tool(name: &str, description: &str) -> Tool {
+pub(crate) fn tool(name: &str, description: &str) -> Tool {
     let serde_json::Value::Object(schema) = serde_json::json!({ "type": "object", "properties": { "text": { "type": "string" } } })
     else {
         unreachable!()
@@ -61,7 +61,7 @@ fn tool(name: &str, description: &str) -> Tool {
     Tool::new(name.to_string(), description.to_string(), schema)
 }
 
-async fn stub_server(tools: Arc<Mutex<Vec<Tool>>>) -> String {
+pub(crate) async fn stub_server(tools: Arc<Mutex<Vec<Tool>>>) -> String {
     let stub = Stub { tools };
     let service = StreamableHttpService::new(
         move || Ok(stub.clone()),
@@ -114,7 +114,7 @@ fn hub(dir: &std::path::Path, events: Events) -> Arc<Hub> {
     Arc::new(Hub::detached(Db::open(dir).unwrap(), Box::new(MemoryKeys::default()), events, dir.join("work")))
 }
 
-fn url_connector(url: &str, key: &str) -> Connector {
+pub(crate) fn url_connector(url: &str, key: &str) -> Connector {
     Connector {
         id: String::new(),
         slug: "stub".into(),
@@ -142,6 +142,8 @@ fn agent(connectors: &[(&str, Setting)]) -> AgentConfig {
         connectors: connectors.iter().map(|(id, s)| (id.to_string(), *s)).collect(),
         model: "test".into(),
         effort: "medium".into(),
+        program: String::new(),
+        daily_limit: String::new(),
     }
 }
 

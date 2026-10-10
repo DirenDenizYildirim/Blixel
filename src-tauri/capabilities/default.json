@@ -44,6 +44,8 @@
     "allow-agent-save",
     "allow-agents-list",
     "allow-agent-remove",
+    "allow-usage-today",
+    "allow-usage-days",
     "allow-connectors-list",
     "allow-connector-save",
     "allow-connector-remove",

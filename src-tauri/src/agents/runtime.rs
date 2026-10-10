@@ -10,6 +10,7 @@ use crate::events::{Events, Status};
 
 use super::permissions::{Answer, Broker};
 use super::settings::{AgentConfig, Setting, Tool};
+use super::usage::{self, Usage};
 
 pub struct AgentRuntime {
     pub id: String,
@@ -22,6 +23,10 @@ pub struct AgentRuntime {
     /// Cancelled when the user stops the agent, so its running commands stop
     /// even if its program does not cancel them; then renewed for later ones.
     commands: Mutex<CancellationToken>,
+    /// What it spent today and in its current turn.
+    pub usage: Usage,
+    /// The daily limit text last reported as unreadable, so it is said once.
+    limit_noted: Mutex<Option<String>>,
 }
 
 /// The outcome of checking a tool call against the agent's settings.
@@ -37,6 +42,7 @@ impl AgentRuntime {
     pub fn new(config: AgentConfig, events: Events, broker: Arc<Broker>) -> Arc<Self> {
         Arc::new(Self {
             id: config.id.clone(),
+            usage: Usage::new(&config.id),
             config: RwLock::new(config),
             events,
             broker,
@@ -44,6 +50,7 @@ impl AgentRuntime {
             stopped: AtomicBool::new(false),
             last_status: Mutex::new(None),
             commands: Mutex::new(CancellationToken::new()),
+            limit_noted: Mutex::default(),
         })
     }
 
@@ -87,12 +94,16 @@ impl AgentRuntime {
 
     /// Status comes from what the core observes, never from what the agent says.
     pub fn refresh_status(&self) {
-        let status = if self.stopped.load(Ordering::SeqCst) {
-            Status::Stopped
-        } else if self.broker.waiting_for(&self.id) > 0 {
+        let stopped = self.stopped.load(Ordering::SeqCst);
+        let status = if !stopped && self.broker.waiting_for(&self.id) > 0 {
             Status::Waiting
-        } else if self.turn_active.load(Ordering::SeqCst) {
+        } else if !stopped && self.turn_active.load(Ordering::SeqCst) {
             Status::Working
+        } else if self.over_limit().is_some() {
+            // It would not start again anyway, so this says more than Stopped.
+            Status::Limited
+        } else if stopped {
+            Status::Stopped
         } else {
             Status::Idle
         };
@@ -101,6 +112,57 @@ impl AgentRuntime {
             *last = Some(status);
             self.events.status(&self.id, status);
         }
+    }
+
+    /// Shows that it can work again if it was shown at its limit, e.g. when
+    /// the day turns.
+    pub fn refresh_if_limited(&self) {
+        if *self.last_status.lock().expect("status lock") == Some(Status::Limited) {
+            self.refresh_status();
+        }
+    }
+
+    /// Its daily limit in US dollars, if it has one. A limit that is not an
+    /// amount counts as none, and the user is told so once.
+    pub fn limit(&self) -> Option<f64> {
+        let text = self.config.read().expect("config lock").daily_limit.clone();
+        match usage::parse_limit(&text) {
+            Ok(limit) => limit,
+            Err(()) => {
+                let mut noted = self.limit_noted.lock().expect("limit lock");
+                if noted.as_deref() != Some(text.as_str()) {
+                    let note = format!(
+                        "{}'s daily limit “{}” is not an amount in dollars, so it has no limit. Write it like 5 or 2.50.",
+                        self.name(),
+                        text.trim()
+                    );
+                    self.events.note(&self.id, &note);
+                    *noted = Some(text);
+                }
+                None
+            }
+        }
+    }
+
+    /// Why it may not start a turn now: it reached today's limit. None while it may.
+    pub fn over_limit(&self) -> Option<String> {
+        let limit = self.limit()?;
+        let spent = self.usage.today();
+        // A small margin, so sums like 0.1 + 0.2 reach a limit of 0.3.
+        (spent + 1e-9 >= limit).then(|| {
+            format!(
+                "{} reached today's limit of {} ({} spent). Raise the limit in its settings, or it can work again tomorrow.",
+                self.name(),
+                usage::dollars(limit),
+                usage::dollars(spent)
+            )
+        })
+    }
+
+    /// Counts what its running session reports having spent, and tells the interface.
+    pub fn spent(&self, usd: f64) {
+        let (today, turn) = self.usage.add(usd);
+        self.events.usage(&self.id, today, turn, self.limit());
     }
 
     /// Asks the user directly, whatever the setting says. Nothing records the

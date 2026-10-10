@@ -7,6 +7,13 @@ mod secrets;
 mod store;
 mod workspace;
 
+/// Starts this app's binary as the stand-in agent instead of the app (debug
+/// builds only): `stand_in::main`, which `main.rs` runs when this is the first
+/// argument.
+pub const STAND_IN_FLAG: &str = "--stand-in-agent";
+#[cfg(debug_assertions)]
+pub mod stand_in;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -25,7 +32,18 @@ pub fn run() {
                 use tauri::Manager;
                 let hub = std::sync::Arc::new(connectors::Hub::default());
                 hub.attach(app.handle().clone());
-                app.manage(agents::Agents::new(events::Events::new(app.handle().clone()), hub.clone()));
+                let db = store::DbRef::App(app.handle().clone());
+                app.manage(agents::Agents::new(events::Events::new(app.handle().clone()), hub.clone(), Some(db)));
+                // Agents at their daily limit may work again once the day turns. Woken at
+                // least every quarter hour, so a changed clock or a suspend is noticed too.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let most = std::time::Duration::from_secs(15 * 60);
+                    loop {
+                        tokio::time::sleep(agents::usage::until_tomorrow().unwrap_or(most).min(most)).await;
+                        handle.state::<agents::Agents>().refresh_limited();
+                    }
+                });
                 app.manage(hub);
                 // A broken or busy database never stops the app: see `store_status`.
                 let (db, status) = store::Db::open_or_recover(&app.path().app_data_dir()?);
@@ -76,6 +94,8 @@ pub fn run() {
             agents::agent_save,
             agents::agents_list,
             agents::agent_remove,
+            agents::usage_today,
+            agents::usage_days,
             connectors::connectors_list,
             connectors::connector_save,
             connectors::connector_remove,

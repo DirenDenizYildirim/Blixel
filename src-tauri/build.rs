@@ -38,6 +38,8 @@ const COMMANDS: &[&str] = &[
     "agent_save",
     "agents_list",
     "agent_remove",
+    "usage_today",
+    "usage_days",
     "connectors_list",
     "connector_save",
     "connector_remove",

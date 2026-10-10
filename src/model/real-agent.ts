@@ -22,18 +22,26 @@ import {
   useStore,
   writeShell,
 } from "./store";
-import { followRealAgent, linkTaskMessage, stopTasksOf, taskNotSent } from "./tasks";
+import { followRealAgent, linkTaskMessage, removeTask, stopTasksOf, taskNotSent } from "./tasks";
 import type { ActivityVerb, Agent, AgentStatus, ChatItem, ModelChoice, Permission, SavedAgent, ToolId } from "./types";
+import { reportUsage, turnStarted } from "./usage";
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(cmd, args);
 }
 
-/** Whether an agent created now with these settings would be a real one. */
+/**
+ * Whether an agent created now with these settings would be a real one. The
+ * stand-in is a test program the core runs like Claude Code, without a key
+ * (only debug builds of the core run it).
+ */
 export function canRunForReal(agent: Pick<Agent, "runsOn" | "program">) {
-  return inTauri && agent.runsOn === "api-key" && agent.program === "claude-code";
+  return inTauri && agent.runsOn === "api-key" && (agent.program === "claude-code" || agent.program === "stand-in");
 }
+
+/** Whether the agent's program needs the Anthropic API key. */
+export const needsApiKey = (agent: Pick<Agent, "program">) => agent.program !== "stand-in";
 
 export async function hasApiKey(provider = "anthropic"): Promise<boolean> {
   if (!inTauri) return false;
@@ -64,6 +72,7 @@ export async function syncAgent(agent: Agent, reviewed = false): Promise<SavedAg
     config: {
       id: agent.id,
       name: agent.name,
+      program: agent.program,
       instructions: agent.instructions,
       readNotes: agent.readNotes,
       permissions: agent.permissions,
@@ -73,6 +82,7 @@ export async function syncAgent(agent: Agent, reviewed = false): Promise<SavedAg
       rulePacks: agent.rulePacks.map(({ label, instructions, editArea, protect }) => ({ label, instructions, editArea, protect })),
       model: agent.model,
       effort: agent.effort,
+      dailyLimit: agent.dailyLimit,
     },
   });
   return null;
@@ -101,14 +111,37 @@ useStore.subscribe((s, prev) => {
 export async function sendToRealAgent(agentId: string, text: string, asTask: boolean, taskId?: string): Promise<string> {
   const messageId = uid("u");
   pushChat(agentId, { kind: "user", id: messageId, text, asTask });
-  if (asTask) linkTaskMessage(agentId, messageId, text, taskId);
+  const linked = asTask ? linkTaskMessage(agentId, messageId, text, taskId) : null;
   try {
     await invoke<void>("send_prompt", { agentId, messageId, text: asTask ? text : `(Chat message, not a task.) ${text}` });
   } catch (e) {
     pushChat(agentId, { kind: "note", id: uid("n"), text: String(e) });
-    taskNotSent(messageId);
+    notSent(agentId, messageId, text, linked !== null && linked !== taskId ? linked : null);
   }
   return messageId;
+}
+
+/** Puts messages that did not go out back in the message box, before what is typed there now. */
+export function returnToBox(agentId: string, texts: string[]) {
+  const draft = useStore.getState().drafts[agentId]?.trim();
+  if (texts.length) setDraft(agentId, [...texts, ...(draft ? [draft] : [])].join("\n\n"));
+}
+
+/**
+ * A message the agent refused (at its daily limit, say). One typed in the
+ * box goes back there, and the task it made (`madeTask`) goes with it, so
+ * sending it again makes no second one. A task given from the Tasks panel
+ * stays there, to do.
+ */
+export function notSent(agentId: string, messageId: string, text: string, madeTask: string | null) {
+  const item = useStore.getState().chats[agentId]?.find((it) => it.id === messageId);
+  if (item?.kind === "user" && item.asTask && !madeTask) {
+    taskNotSent(messageId);
+    return;
+  }
+  patchChat(agentId, messageId, { delivery: "returned" } as Partial<ChatItem>);
+  if (madeTask) removeTask(madeTask);
+  returnToBox(agentId, [text]);
 }
 
 export function cancelTurn(agentId: string) {
@@ -161,6 +194,8 @@ function queueReplay(e: EditEvent) {
   replays.set(e.agentId, next.catch(() => undefined));
 }
 
+const busy = (status: AgentStatus | undefined) => status === "working" || status === "waiting";
+
 let started = false;
 
 export async function listenToCore() {
@@ -175,9 +210,11 @@ export async function listenToCore() {
     });
 
   await listen<{ agentId: string; status: AgentStatus }>("agent://status", ({ payload }) => {
+    const before = agentById(payload.agentId)?.status;
+    if (busy(payload.status) && !busy(before)) turnStarted(payload.agentId);
     setStatus(payload.agentId, payload.status);
     followRealAgent(payload.agentId, payload.status);
-    if (payload.status === "idle" || payload.status === "stopped") {
+    if (payload.status === "idle" || payload.status === "stopped" || payload.status === "limited") {
       const path = lastPath.get(payload.agentId);
       void (replays.get(payload.agentId) ?? Promise.resolve()).then(() => {
         if (path) hideCaret(payload.agentId, path);
@@ -258,10 +295,19 @@ export async function listenToCore() {
     if (payload.current && payload.current !== agent.model) updateAgent(agent.id, { model: payload.current });
   });
 
+  // What the agent spent: today, and in its current turn so far. The turn's cost also goes to its task.
+  await listen<{ agentId: string; todayUsd: number; turnUsd: number; limitUsd: number | null }>("agent://usage", ({ payload }) => {
+    reportUsage(payload.agentId, Number(payload.todayUsd), Number(payload.turnUsd));
+  });
+
   // Messages sent while the agent was busy wait for its turn to end.
   await listen<{ agentId: string; queued: string[] }>("agent://queue", ({ payload }) => {
     const queued = new Set(payload.queued);
-    for (const item of useStore.getState().chats[payload.agentId] ?? []) {
+    const items = useStore.getState().chats[payload.agentId] ?? [];
+    // Waiting messages going out while the agent is busy start its next turn.
+    const sent = items.some((it) => it.kind === "user" && it.delivery === "queued" && !queued.has(it.id));
+    if (sent && busy(agentById(payload.agentId)?.status)) turnStarted(payload.agentId);
+    for (const item of items) {
       if (item.kind !== "user" || item.delivery === "returned") continue;
       const delivery = queued.has(item.id) ? "queued" : undefined;
       if (item.delivery !== delivery) patchChat(payload.agentId, item.id, { delivery } as Partial<ChatItem>);
@@ -279,8 +325,7 @@ export async function listenToCore() {
       texts.push(item.text);
       patchChat(payload.agentId, id, { delivery: "returned" } as Partial<ChatItem>);
     }
-    const draft = useStore.getState().drafts[payload.agentId]?.trim();
-    if (texts.length) setDraft(payload.agentId, [...texts, ...(draft ? [draft] : [])].join("\n\n"));
+    returnToBox(payload.agentId, texts);
     followRealAgent(payload.agentId);
   });
 

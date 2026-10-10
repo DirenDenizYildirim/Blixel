@@ -7,6 +7,7 @@
 import { inTauri } from "./backend";
 import { agentSave, agentsList, itemsDelete, itemsLoad, itemsPut, storeGet, storeSet, type Json } from "./core-api";
 import { notify, setAgentTrust, useStore, type ProjectData, type ShellState } from "./store";
+import { loadUsage } from "./usage";
 import type { Agent, ChatItem, Project, ProjectUi, SavedAgent, Task } from "./types";
 
 const CHAT_KEEP = 2000;
@@ -485,15 +486,17 @@ export async function loadProject(project: Project): Promise<ProjectData> {
   };
 
   const saved = await attempt("its agents", () => agentsList(project.id), []);
-  const agents: Agent[] = saved.map((s) => ({ ...s.agent, status: "idle" }));
+  // One at today's spending limit says so from the start (the core marks it).
+  const agents: Agent[] = saved.map((s) => ({ ...s.agent, status: s.agent.status === "limited" ? "limited" : "idle" }));
   const agentTrust: ProjectData["agentTrust"] = {};
   for (const s of saved) if (s.trust === "changed-outside") agentTrust[s.agent.id] = s.trust;
 
-  const [ui, savedTasks, chatLists, shellDocs] = await Promise.all([
+  const [ui, savedTasks, chatLists, shellDocs, usage] = await Promise.all([
     attempt("its layout", () => storeGet<Json>(at, "ui"), null),
     attempt("its tasks", () => itemsLoad<Json>(at, "tasks", TASK_KEEP), []),
     Promise.all(agents.map((a) => attempt(`${a.name}'s chat`, () => itemsLoad<Json>(at, chatList(a.id), CHAT_KEEP), []))),
     Promise.all(agents.map((a) => attempt(`${a.name}'s shell`, () => storeGet<Json>(at, shellKey(a.id)), null))),
+    attempt("today's spending", () => loadUsage(project.id, agents.map((a) => a.id)), {}),
   ]);
   const view = (ui as unknown as ProjectUi | null)?.v === 1 ? (ui as unknown as ProjectUi) : null;
   const ids = new Set(agents.map((a) => a.id));
@@ -515,7 +518,11 @@ export async function loadProject(project: Project): Promise<ProjectData> {
     shells[agent.id] = { title: typeof shell?.title === "string" ? shell.title : "", data, total: data.length };
   });
 
-  const valid = (savedTasks as unknown[]).filter(isTask).map((t) => ({ ...t, notes: typeof t.notes === "string" ? t.notes : "" }));
+  const valid = (savedTasks as unknown[]).filter(isTask).map((t) => {
+    const { cost, ...task } = t;
+    const counted = typeof cost === "number" && Number.isFinite(cost) && cost > 0;
+    return { ...task, notes: typeof t.notes === "string" ? t.notes : "", ...(counted ? { cost } : {}) };
+  });
   const tasks = valid.map((t) => settleTask(t, "quit"));
   const fixedTasks = tasks.filter((t, i) => t !== valid[i]);
   const taskRows = rowsOf("tasks", fixedTasks);
@@ -533,6 +540,7 @@ export async function loadProject(project: Project): Promise<ProjectData> {
     chats,
     shells,
     tasks,
+    usage,
     selectedId,
     following: null,
     drafts,

@@ -29,3 +29,26 @@
 .review-card .btn { height: 30px; padding: 0 12px; font-size: 12px; }
 /* A long run of activity is split into blocks of a few hundred lines; they read as one log. */
 .activity + .activity { margin-top: -10px; }
+
+/* What the agent spent today, after its description in the head. In a narrow
+   head the description (also in the sidebar) gives way first, then the limit
+   and the word "today" (the title keeps them); the name stays whole. */
+.chat-head { container: chat-head / inline-size; }
+.chat-who:has(.chat-spend) > span:first-child { flex-shrink: 0; max-width: 70%; }
+.chat-who > .chat-spend { flex: 0 1 auto; }
+@container chat-head (max-width: 580px) {
+  .chat-who:has(.chat-spend) .chat-desc { display: none; }
+}
+@container chat-head (max-width: 350px) {
+  .spend-limit { display: none; }
+}
+@container chat-head (max-width: 250px) {
+  .spend-today { display: none; }
+}
+.chat-spend[data-level="near"] { color: var(--warn); }
+.chat-spend[data-level="at"] { color: var(--danger-fg); }
+
+/* Under the message box while the agent is at its daily limit. */
+.composer[data-hint] { margin-bottom: 6px; }
+.composer-hint { flex: none; margin: 0 24px 12px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.composer-hint .link-btn { padding: 0; }

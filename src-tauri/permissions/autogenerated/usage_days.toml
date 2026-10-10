@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-usage-days"
+description = "Enables the usage_days command without any pre-configured scope."
+commands.allow = ["usage_days"]
+
+[[permission]]
+identifier = "deny-usage-days"
+description = "Denies the usage_days command without any pre-configured scope."
+commands.deny = ["usage_days"]

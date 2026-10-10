@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // The stand-in agent (debug builds): the same binary, run by the app as an agent program.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == blixel_lib::STAND_IN_FLAG) {
+        std::process::exit(blixel_lib::stand_in::main());
+    }
     // Set before any threads start.
     #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()

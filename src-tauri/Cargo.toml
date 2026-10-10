@@ -20,7 +20,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ignore = "0.4"
-agent-client-protocol = { version = "3.1", features = ["process"] }
+# "stdio" serves the stand-in agent (stand_in.rs) over its standard input and output.
+agent-client-protocol = { version = "3.1", features = ["process", "stdio"] }
 rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 # Saved data (store/), with a keyed check on rows that grant agents anything,
 # whose key comes from the OS (the getrandom version Tauri already uses).
@@ -34,6 +35,8 @@ tokio-util = "0.7"
 # Hashes of mod folders, and mod scripts embedded in their host page.
 sha2 = "0.10"
 base64 = "0.22"
+# The local calendar day that agents' spending is counted by (agents/usage.rs).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [profile.release]
 codegen-units = 1

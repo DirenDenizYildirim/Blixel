@@ -7,6 +7,7 @@ import { ViewMenuButton } from "../layout/ViewMenu";
 import { isOpen, setChatOpen, setEditorOpen, toggleShell, useLayout } from "../model/layout";
 import { agentById, hueOf, notify, setComposerMode, setDraft, showView, useStore } from "../model/store";
 import type { ActivityEntry, Agent, ChatItem } from "../model/types";
+import { formatUsd, limitOf, showsSpending, spendLevel, useUsage } from "../model/usage";
 import { visibleText } from "../model/visible-text";
 import { agentColor } from "../theme/theme";
 import { Segmented } from "./controls";
@@ -81,8 +82,10 @@ export function ChatPanel() {
           onClick={() => showView({ kind: "agent-form", editingId: agent.id })}
         >
           <span>
-            {agent.name}, {agentSubline(agent)}
+            {agent.name}
+            <span className="chat-desc">, {agentSubline(agent)}</span>
           </span>
+          <Spending agent={agent} />
           <ChevronDown size={11} color="currentColor" width={2.6} />
         </button>
         {tools}
@@ -106,6 +109,25 @@ export function ChatPanel() {
 
       <Composer agent={agent} />
     </section>
+  );
+}
+
+/** What the agent spent today, after its description: in the warning colour from 80% of its limit, the danger colour at it. */
+function Spending({ agent }: { agent: Agent }) {
+  const usage = useUsage(agent.id);
+  if (!showsSpending(agent, usage)) return null;
+  const limit = limitOf(agent);
+  const spent = formatUsd(usage.today);
+  return (
+    <span
+      className="chat-spend"
+      data-level={spendLevel(agent, usage.today)}
+      title={limit === null ? `Spent today: ${spent}, no daily limit` : `Spent today: ${spent} of its ${formatUsd(limit)} daily limit`}
+    >
+      · {spent}
+      <span className="spend-today"> today</span>
+      {limit !== null && <span className="spend-limit"> · limit {formatUsd(limit)}</span>}
+    </span>
   );
 }
 
@@ -284,64 +306,76 @@ function Composer({ agent }: { agent: Agent }) {
   const setText = (value: string) => setDraft(agent.id, value);
 
   const busy = !agent.placeholder && (agent.status === "working" || agent.status === "waiting");
+  const limited = agent.status === "limited";
   const send = () => {
     const body = text.trim();
     if (!body) return;
+    // Emptied first: a message the agent refuses (at its daily limit, say) comes back into the box.
+    setText("");
     if (agent.placeholder) sendToAgent(agent.id, body, mode === "task");
     else void sendToRealAgent(agent.id, body, mode === "task");
-    setText("");
   };
 
   return (
-    <div className="composer">
-      <textarea
-        rows={2}
-        aria-label={`Message ${agent.name}`}
-        placeholder={mode === "task" ? `Give ${agent.name} a task ...` : `Message ${agent.name} ...`}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        }}
-      />
-      <div className="composer-bar">
-        <button type="button" className="square-btn" aria-label="Attach a file" onClick={() => notify("Attaching files comes in a later milestone.")}>
-          <PlusIcon size={16} color="currentColor" width={2.2} />
-        </button>
-        <button
-          type="button"
-          className="square-btn"
-          aria-label={`${showShell ? "Hide" : "Show"} ${agent.name}'s shell`}
-          title={`${showShell ? "Hide" : "Show"} ${agent.name}'s shell (Ctrl+J)`}
-          aria-pressed={showShell}
-          onClick={toggleShell}
-        >
-          <TerminalIcon size={16} color="currentColor" />
-        </button>
-        <TasksButton agent={agent} />
-        <span className="grow" />
-        <Segmented
-          label="Send as"
-          value={mode}
-          options={[
-            { value: "chat", label: "Chat" },
-            { value: "task", label: "Task" },
-          ]}
-          onChange={setComposerMode}
+    <>
+      <div className="composer" data-hint={limited || undefined}>
+        <textarea
+          rows={2}
+          aria-label={`Message ${agent.name}`}
+          placeholder={mode === "task" ? `Give ${agent.name} a task ...` : `Message ${agent.name} ...`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
         />
-        {busy && !text.trim() ? (
-          <button type="button" className="square-btn send" aria-label={`Stop ${agent.name}`} title="Stop this turn" onClick={() => void cancelTurn(agent.id)}>
-            <StopIcon />
+        <div className="composer-bar">
+          <button type="button" className="square-btn" aria-label="Attach a file" onClick={() => notify("Attaching files comes in a later milestone.")}>
+            <PlusIcon size={16} color="currentColor" width={2.2} />
           </button>
-        ) : (
-          <button type="button" className="square-btn send" aria-label="Send" disabled={!text.trim()} onClick={send}>
-            <SendIcon />
+          <button
+            type="button"
+            className="square-btn"
+            aria-label={`${showShell ? "Hide" : "Show"} ${agent.name}'s shell`}
+            title={`${showShell ? "Hide" : "Show"} ${agent.name}'s shell (Ctrl+J)`}
+            aria-pressed={showShell}
+            onClick={toggleShell}
+          >
+            <TerminalIcon size={16} color="currentColor" />
           </button>
-        )}
+          <TasksButton agent={agent} />
+          <span className="grow" />
+          <Segmented
+            label="Send as"
+            value={mode}
+            options={[
+              { value: "chat", label: "Chat" },
+              { value: "task", label: "Task" },
+            ]}
+            onChange={setComposerMode}
+          />
+          {busy && !text.trim() ? (
+            <button type="button" className="square-btn send" aria-label={`Stop ${agent.name}`} title="Stop this turn" onClick={() => void cancelTurn(agent.id)}>
+              <StopIcon />
+            </button>
+          ) : (
+            <button type="button" className="square-btn send" aria-label="Send" disabled={!text.trim()} onClick={send}>
+              <SendIcon />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+      {limited && (
+        <div className="composer-hint" role="status">
+          {agent.name} reached today's limit.{" "}
+          <button type="button" className="link-btn" onClick={() => showView({ kind: "agent-form", editingId: agent.id })}>
+            Raise it in its settings.
+          </button>
+        </div>
+      )}
+    </>
   );
 }

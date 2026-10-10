@@ -6,6 +6,7 @@ import { closeView, openView } from "../model/layout";
 import { useStore } from "../model/store";
 import { createTask, editTask, giveTask, removeTask, setTaskStatus, useOpenTaskCount, useTasksOpen } from "../model/tasks";
 import type { Agent, Task, TaskStatus } from "../model/types";
+import { formatUsd } from "../model/usage";
 import { ChevronDown, ChevronRight, CloseIcon, PlusIcon, TasksIcon } from "./icons";
 import "./tasks.css";
 
@@ -168,6 +169,11 @@ function TaskRow(props: { task: Task; agent: Agent | undefined; agents: Map<stri
         >
           {task.title}
         </button>
+        {task.cost ? (
+          <span className="task-cost" title={`${owner?.name ?? "Its agent"} spent ${formatUsd(task.cost)} on it`}>
+            {formatUsd(task.cost)}
+          </span>
+        ) : null}
         {unassigned && agent && task.status !== "done" && (
           <button
             type="button"

@@ -6,8 +6,8 @@ import { AgentConnectors } from "../connectors/AgentConnectors";
 import { isActive, modName, useMods, useRulePacks, type AvailableRulePack } from "../mods/registry";
 import { removeAgent } from "../model/agent-actions";
 import { useSettings } from "../model/app-settings";
-import { sendToAgent } from "../model/mock-agent";
-import { canRunForReal, hasApiKey, saveApiKey, sendToRealAgent, syncAgent } from "../model/real-agent";
+import { recheckLimit, sendToAgent } from "../model/mock-agent";
+import { canRunForReal, hasApiKey, needsApiKey, saveApiKey, sendToRealAgent, syncAgent } from "../model/real-agent";
 import { describeArea, PROTECTED_NAMES } from "../model/paths";
 import { agentById, hueOf, modelName, notify, saveAgent, setAgentTrust, showView, uid, useStore } from "../model/store";
 import {
@@ -21,9 +21,12 @@ import {
   type RunsOn,
   type ToolId,
 } from "../model/types";
+import { formatUsd, LIMIT_PROBLEM, limitText, parseLimit, spendLevel, useUsage } from "../model/usage";
 import { agentColor, agentTint } from "../theme/theme";
 import { Segmented, Switch } from "./controls";
 import { agentSubline } from "./Sidebar";
+import { StandInHelp } from "./StandInHelp";
+import "./agent-form.css";
 
 const NAME_POOL = ["Wren", "Heron", "Lark", "Cicada", "Ibis", "Tern", "Mantis", "Sable", "Quill", "Ember", "Finch", "Otter"];
 
@@ -98,30 +101,37 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
   const others = agents.filter((a) => a.id !== draft.id);
   const nameTaken = others.some((a) => a.name.trim().toLowerCase() === draft.name.trim().toLowerCase());
   const real = editing ? !editing.placeholder : canRunForReal(draft);
+  const limit = parseLimit(draft.dailyLimit);
   const problem = !draft.name.trim()
     ? "Give it a name."
     : nameTaken
       ? "Another agent already has this name."
-      : real && !keySaved && !apiKey.trim()
+      : real && needsApiKey(draft) && !keySaved && !apiKey.trim()
         ? "Paste your Anthropic API key to run this agent."
-        : null;
+        : limit === undefined
+          ? LIMIT_PROBLEM
+          : null;
   const hue = hueOf(draft);
 
   const submit = async () => {
     if (problem || saving) return;
     setSaving(true);
     try {
-      if (real && apiKey.trim()) await saveApiKey(apiKey.trim());
+      if (real && needsApiKey(draft) && apiKey.trim()) await saveApiKey(apiKey.trim());
       const agent: Agent = {
         ...draft,
         name: draft.name.trim(),
         editPaths: limitArea ? draft.editPaths : "",
+        dailyLimit: limitText(limit ?? null),
         placeholder: !real,
       };
       // Saving here is the user's review: in a project the core trusts the
       // record again (if it was changed outside the app) and saves it.
       const saved = await syncAgent(agent, true);
-      saveAgent(agent);
+      // Its status as it is now, not as when the form opened: it may have
+      // finished, or (with a raised limit) be free to work again.
+      saveAgent({ ...agent, status: agentById(agent.id)?.status ?? agent.status });
+      if (!real) recheckLimit(agent.id);
       if (saved?.trust === "changed-outside") setAgentTrust(agent.id, "changed-outside");
       const task = firstTask.trim();
       if (!editing && task) {
@@ -371,16 +381,11 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
                 onChange={(e) => set("typingSpeed", Number(e.target.value))}
               />
             </label>
-            <label className="field grow-limit">
-              <span className="label">Daily spending limit (USD)</span>
-              <input
-                className="input"
-                placeholder={real ? "Not active for real agents yet" : "No limit"}
-                value={draft.dailyLimit}
-                disabled={real}
-                onChange={(e) => set("dailyLimit", e.target.value)}
-              />
-            </label>
+            <DailyLimit draft={draft} editing={Boolean(editing)} limit={limit} onChange={(v) => set("dailyLimit", v)} />
+          </div>
+          <div className="hint-line top10 limit-hint">
+            Once today's spending reaches the limit, it starts nothing new until tomorrow or until you raise the limit. A
+            turn that crosses the limit still finishes, so a day can end a little over.
           </div>
           <div className="row wrap gap16 center top14">
             <span className="label">When it has nothing to do</span>
@@ -438,6 +443,9 @@ function RunsOnFields(props: {
 }) {
   const { draft, setDraft } = props;
   const programs: Program[] = draft.runsOn === "self-hosted" ? ["opencode"] : ["claude-code", "codex"];
+  // The stand-in is for trying the real-agent path without a key, so only development builds offer it.
+  if (draft.runsOn === "api-key" && import.meta.env.DEV) programs.push("stand-in");
+  if (!programs.includes(draft.program)) programs.push(draft.program);
   const offered = useStore((s) => s.models[draft.program]);
   // Keep the agent's own model listed even if the program no longer offers it.
   const models = offered.some((m) => m.id === draft.model) ? offered : [{ id: draft.model, name: draft.model }, ...offered];
@@ -471,7 +479,7 @@ function RunsOnFields(props: {
             ))}
           </select>
         </label>
-        {draft.runsOn === "api-key" && (
+        {draft.runsOn === "api-key" && needsApiKey(draft) && (
           <label className="field grow2">
             <span className="label">API key</span>
             <input
@@ -505,11 +513,46 @@ function RunsOnFields(props: {
         />
         <span className="label note">{runsOnNote(draft, props.real)}</span>
       </div>
+      {draft.program === "stand-in" && <StandInHelp />}
     </>
   );
 }
 
+/** The daily limit as typed, and what the agent spent today against it. */
+function DailyLimit(props: { draft: Agent; editing: boolean; limit: number | null | undefined; onChange: (text: string) => void }) {
+  const { draft, limit } = props;
+  const usage = useUsage(draft.id);
+  const bad = limit === undefined;
+  // Against the limit as typed here, so raising it shows at once what it would mean.
+  const level = bad ? "bad" : spendLevel({ dailyLimit: draft.dailyLimit, status: "idle" }, usage.today);
+  const today =
+    props.editing && !bad ? `Today: ${formatUsd(usage.today)}${limit === null ? ", no limit" : ` of ${formatUsd(limit)}`}` : null;
+  return (
+    <label className="field grow-limit">
+      <span className="label">Daily spending limit (USD)</span>
+      <input
+        className="input"
+        inputMode="decimal"
+        placeholder="No limit"
+        value={draft.dailyLimit}
+        aria-invalid={bad || undefined}
+        aria-describedby={bad || today ? "limit-today" : undefined}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      {(bad || today) && (
+        <span id="limit-today" className="limit-today" data-level={level}>
+          {bad ? LIMIT_PROBLEM : today}
+        </span>
+      )}
+    </label>
+  );
+}
+
 function runsOnNote(draft: Agent, real: boolean): string {
+  if (draft.program === "stand-in")
+    return real
+      ? "A test program that follows simple instructions instead of a model, so you can try everything without a key. Only in development builds."
+      : "The stand-in runs in the desktop app. Here this agent is a scripted placeholder.";
   if (draft.runsOn === "api-key")
     return real
       ? "The key is kept in your system keychain, never in the project, chat or logs."
@@ -684,7 +727,9 @@ function Preview(props: {
               </span>
             </span>
             <span className="agent-row-sub">
-              {draft.runsOn === "api-key" ? `${modelName(draft.program, draft.model)}, API key` : agentSubline(draft)}
+              {draft.runsOn === "api-key" && draft.program !== "stand-in"
+                ? `${modelName(draft.program, draft.model)}, API key`
+                : agentSubline(draft)}
             </span>
           </span>
         </div>

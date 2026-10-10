@@ -2,11 +2,14 @@
 //! process over ACP, with its built-in edit and shell tools replaced by
 //! Blixel's own.
 
+#[cfg(test)]
+mod end_to_end;
 pub mod permissions;
 pub mod runtime;
 pub mod session;
 pub mod settings;
 pub mod tools;
+pub mod usage;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,13 +22,13 @@ use serde_json::Value;
 
 use crate::events::Events;
 use crate::secrets;
-use crate::store::{self, Db};
+use crate::store::{self, Db, DbRef};
 use crate::workspace::Workspace;
 
 use permissions::{Answer, Broker};
 use runtime::AgentRuntime;
-use session::Command;
-use settings::AgentConfig;
+use session::{Command, Launch};
+use settings::{AgentConfig, STAND_IN};
 
 /// Hears an agent's session id once its program reports it.
 type OnSession = Box<dyn Fn(&str) + Send + Sync>;
@@ -49,14 +52,25 @@ pub struct Agents {
     events: Events,
     hub: Arc<crate::connectors::Hub>,
     broker: Arc<Broker>,
+    /// Where agents' spending is kept; None keeps it in memory (tests).
+    db: Option<DbRef>,
     entries: Mutex<HashMap<String, Entry>>,
     /// The open project, whose agents `entries` holds.
     project: Mutex<Option<String>>,
 }
 
 impl Agents {
-    pub fn new(events: Events, hub: Arc<crate::connectors::Hub>) -> Self {
-        Self { events, hub, broker: Arc::default(), entries: Mutex::default(), project: Mutex::default() }
+    pub fn new(events: Events, hub: Arc<crate::connectors::Hub>, db: Option<DbRef>) -> Self {
+        Self { events, hub, broker: Arc::default(), db, entries: Mutex::default(), project: Mutex::default() }
+    }
+
+    /// A new agent's runtime, counting its spending in its project's rows.
+    fn runtime(&self, config: AgentConfig, project: Option<&str>) -> Arc<AgentRuntime> {
+        let rt = AgentRuntime::new(config, self.events.clone(), self.broker.clone());
+        if let (Some(db), Some(project)) = (&self.db, project) {
+            rt.usage.keep_in(usage::Books { db: db.clone(), project: project.to_string() });
+        }
+        rt
     }
 
     pub fn project(&self) -> Option<String> {
@@ -76,7 +90,11 @@ impl Agents {
             if !trusted {
                 config.lower_untrusted();
             }
-            let rt = AgentRuntime::new(config.clone(), self.events.clone(), self.broker.clone());
+            let rt = self.runtime(config.clone(), project.as_deref());
+            // One already at today's limit shows so from the start.
+            if rt.over_limit().is_some() {
+                rt.refresh_status();
+            }
             entries.insert(config.id, Entry { rt, session: None, trusted });
         }
         *self.project.lock().expect("project lock") = project;
@@ -102,16 +120,22 @@ impl Agents {
         }
         match entries.get_mut(&config.id) {
             Some(entry) => {
+                let program_changed = (entry.rt.config().program == STAND_IN) != (config.program == STAND_IN);
                 *entry.rt.config.write().expect("config lock") = config;
                 entry.trusted = trusted;
                 if !trusted {
                     self.stop_untrusted(entry);
+                } else if program_changed && entry.session.take().is_some() {
+                    // Another program cannot carry on this one's session: it starts on the next message.
+                    self.broker.deny_all(&self.events, &entry.rt.id);
                 } else if let Some(tx) = &entry.session {
                     let _ = tx.send(Command::Settings);
                 }
+                // A raised (or lowered) daily limit shows at once.
+                entry.rt.refresh_status();
             }
             None => {
-                let rt = AgentRuntime::new(config.clone(), self.events.clone(), self.broker.clone());
+                let rt = self.runtime(config.clone(), self.project().as_deref());
                 entries.insert(config.id, Entry { rt, session: None, trusted });
             }
         }
@@ -139,6 +163,14 @@ impl Agents {
             // Closing the channel ends the session; what it asked is refused.
             self.broker.deny_all(&self.events, &entry.rt.id);
             entry.rt.events.note(&entry.rt.id, &review_first(&entry.rt.name()));
+        }
+    }
+
+    /// Agents shown at their daily limit check it again: past midnight they
+    /// may work again. Run by a timer (`lib.rs`).
+    pub fn refresh_limited(&self) {
+        for entry in self.entries.lock().expect("agents lock").values() {
+            entry.rt.refresh_if_limited();
         }
     }
 
@@ -192,12 +224,17 @@ pub fn send_prompt(
     if !entry.trusted {
         return Err(review_first(&entry.rt.name()));
     }
+    // At today's limit nothing new starts; a new day or a higher limit lets it work again.
+    if let Some(refusal) = entry.rt.over_limit() {
+        entry.rt.refresh_status();
+        return Err(refusal);
+    }
     if entry.session.as_ref().is_some_and(|tx| tx.is_closed()) {
         entry.session = None;
     }
     if entry.session.is_none() {
         let root = workspace.current_root().ok_or("Open a project folder first: real agents work on files on disk.")?;
-        let key = secrets::api_key("anthropic")?.ok_or("No Anthropic API key is saved. Add one in this agent's settings.")?;
+        let launch = launch_for(&entry.rt.config().program)?;
         let dir = config_dir(&app, project.as_deref(), &agent_id)?;
         // Carry on from the agent's last session, and keep each new one for next time.
         let (resume, on_session): (Option<String>, OnSession) = match project {
@@ -235,11 +272,17 @@ pub fn send_prompt(
         let rt = entry.rt.clone();
         let hub = agents.hub.clone();
         rt.restart();
-        rt.events.note(&rt.id, &format!("Starting Claude Code in {}. The first start downloads it, which can take a minute.", root.display()));
+        let starting = match launch {
+            Launch::ClaudeCode { .. } => {
+                format!("Starting Claude Code in {}. The first start downloads it, which can take a minute.", root.display())
+            }
+            Launch::StandIn { .. } => format!("Starting the stand-in in {}.", root.display()),
+        };
+        rt.events.note(&rt.id, &starting);
         // The session ends when the agent exits or when every sender is dropped
         // (stop_all), so the task holds only the receiver.
         tauri::async_runtime::spawn(async move {
-            let outcome = session::run(rt.clone(), root, dir, key, hub, resume, on_session, rx).await;
+            let outcome = session::run(rt.clone(), root, dir, launch, hub, resume, on_session, rx).await;
             if let Err(e) = outcome {
                 rt.events.note(&rt.id, &format!("{} stopped: {e}", rt.name()));
             }
@@ -254,6 +297,21 @@ pub fn send_prompt(
         .expect("session just set")
         .send(Command::Prompt { id: message_id, text })
         .map_err(|_| "The agent stopped before it got the message.".to_string())
+}
+
+/// What starts an agent's program: Claude Code with the saved API key, or
+/// the stand-in, which needs no key and only runs in debug builds.
+fn launch_for(program: &str) -> Result<Launch, String> {
+    if program != STAND_IN {
+        let api_key = secrets::api_key("anthropic")?.ok_or("No Anthropic API key is saved. Add one in this agent's settings.")?;
+        return Ok(Launch::ClaudeCode { api_key });
+    }
+    if !cfg!(debug_assertions) {
+        return Err("The stand-in is a test program that only development builds run. Choose Claude Code in this agent's settings.".into());
+    }
+    // The stand-in is this app's own binary in another mode (see `crate::stand_in`).
+    let exe = std::env::current_exe().map_err(|e| format!("Cannot find the app's own program to start the stand-in: {e}"))?;
+    Ok(Launch::StandIn { exe })
 }
 
 #[tauri::command]
@@ -317,14 +375,43 @@ pub async fn agent_save(project_id: String, agent: Value, reviewed: Option<bool>
 #[tauri::command]
 pub async fn agents_list(project_id: String, app: AppHandle) -> Result<Vec<Value>, String> {
     let id = project_id.clone();
-    let saved = store::blocking(&app, move |db| store::agents::load(&*db.lock()?, &id)).await?;
+    let (saved, spent) = store::blocking(&app, move |db| {
+        let saved = store::agents::load(&*db.lock()?, &id)?;
+        Ok((saved, store::usage::day_totals(db, &id, &usage::today())?))
+    })
+    .await?;
     let agents = app.state::<Agents>();
     if agents.project().as_deref() == Some(project_id.as_str()) {
         for changed in saved.iter().filter(|s| !s.trusted) {
             agents.distrust(changed.id());
         }
     }
-    Ok(saved.iter().map(store::agents::Saved::to_json).collect())
+    let mut listed: Vec<Value> = saved.iter().map(store::agents::Saved::to_json).collect();
+    // One at today's limit says so from the start, before any event.
+    for item in &mut listed {
+        let agent = &mut item["agent"];
+        let limit = usage::parse_limit(agent["dailyLimit"].as_str().unwrap_or_default()).ok().flatten();
+        let spent = agent["id"].as_str().and_then(|id| spent.get(id)).copied().unwrap_or(0.0);
+        if limit.is_some_and(|limit| spent + 1e-9 >= limit) {
+            agent["status"] = "limited".into();
+        }
+    }
+    Ok(listed)
+}
+
+/// What each of a project's agents spent today, in US dollars, by agent id.
+/// Agents that spent nothing are missing.
+#[tauri::command]
+pub async fn usage_today(project_id: String, app: AppHandle) -> Result<HashMap<String, f64>, String> {
+    store::blocking(&app, move |db| store::usage::day_totals(db, &project_id, &usage::today())).await
+}
+
+/// A project's spending over its last `days` days (today included, at most a
+/// year), per agent and day, oldest first: `{ day, agentId, usd, turns }`.
+#[tauri::command]
+pub async fn usage_days(project_id: String, days: u32, app: AppHandle) -> Result<Vec<store::usage::Day>, String> {
+    let first = usage::days_ago(u64::from(days.clamp(1, 366)) - 1);
+    store::blocking(&app, move |db| store::usage::since(db, &project_id, &first)).await
 }
 
 /// Stops the agent, deletes its record and chat, and its program's own folder.
@@ -367,7 +454,7 @@ mod tests {
 
     #[test]
     fn untrusted_settings_stay_lowered_until_reviewed() {
-        let agents = Agents::new(Events::to_sink(|_, _| {}), Arc::default());
+        let agents = Agents::new(Events::to_sink(|_, _| {}), Arc::default(), None);
         agents.open_project(Some("p1".into()), vec![(config("a"), false), (config("b"), true)]);
         let (a, trusted, _) = entry(&agents, "a");
         assert!(!trusted);
@@ -407,7 +494,7 @@ mod tests {
 
     #[test]
     fn opening_a_project_replaces_the_agents_the_core_runs() {
-        let agents = Agents::new(Events::to_sink(|_, _| {}), Arc::default());
+        let agents = Agents::new(Events::to_sink(|_, _| {}), Arc::default(), None);
         agents.open_project(Some("p1".into()), vec![(config("a"), true), (config("b"), true)]);
         assert_eq!((agents.project().as_deref(), ids(&agents)), (Some("p1"), vec!["a".to_string(), "b".into()]));
 
@@ -421,5 +508,57 @@ mod tests {
         agents.remove("c");
         agents.open_project(None, Vec::new());
         assert_eq!((agents.project(), ids(&agents)), (None, Vec::<String>::new()));
+    }
+
+    #[test]
+    fn the_daily_limit_shows_from_the_start_and_clears_when_raised() {
+        let db = Arc::new(Db::memory());
+        db.lock().unwrap().execute("INSERT INTO projects (id, name, folder, created, last_opened) VALUES ('p1', 'p1', '/p1', 1, 1)", []).unwrap();
+        store::usage::add(&db, "p1", "a", &usage::today(), 2.0, 1).unwrap();
+        let seen: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let events = Events::to_sink({
+            let seen = seen.clone();
+            move |name, payload| {
+                if name == "agent://status" || name == "agent://note" {
+                    seen.lock().unwrap().push(payload);
+                }
+            }
+        });
+        let agents = Agents::new(events, Arc::default(), Some(DbRef::Own(db.clone())));
+        let limited = |limit: &str| AgentConfig { daily_limit: limit.into(), ..config("a") };
+
+        // Already at its limit when the project opens: it says so at once, and may not start.
+        agents.open_project(Some("p1".into()), vec![(limited("2"), true), (config("b"), true)]);
+        assert_eq!(*seen.lock().unwrap(), [serde_json::json!({ "agentId": "a", "status": "limited" })], "only the limited one");
+        let refusal = agents.entries.lock().unwrap()["a"].rt.over_limit().unwrap();
+        assert_eq!(refusal, "a reached today's limit of $2.00 ($2.00 spent). Raise the limit in its settings, or it can work again tomorrow.");
+
+        // A higher limit clears it; a limit that is not an amount is none, said once.
+        agents.put(limited("2.50"), None);
+        assert_eq!(seen.lock().unwrap().last().unwrap()["status"], "idle");
+        assert!(agents.entries.lock().unwrap()["a"].rt.over_limit().is_none());
+        agents.put(limited("lots"), None);
+        agents.put(limited("lots"), None);
+        let notes: Vec<Value> = seen.lock().unwrap().iter().filter(|p| p.get("text").is_some()).cloned().collect();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0]["text"].as_str().unwrap().contains("“lots” is not an amount in dollars"));
+
+        // Past midnight it may work again, and says so without waiting for a message.
+        agents.put(limited("2"), None);
+        assert_eq!(seen.lock().unwrap().last().unwrap()["status"], "limited");
+        agents.refresh_limited();
+        assert_eq!(seen.lock().unwrap().last().unwrap()["status"], "limited", "still today");
+        agents.entries.lock().unwrap()["a"].rt.usage.set_clock(|| "2999-01-01".into());
+        agents.refresh_limited();
+        assert_eq!(seen.lock().unwrap().last().unwrap()["status"], "idle");
+
+        // Switching to another program ends the running session: it starts anew on the next message.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        agents.entries.lock().unwrap().get_mut("b").unwrap().session = Some(tx);
+        agents.put(config("b"), None);
+        assert!(matches!(rx.try_recv(), Ok(Command::Settings)), "same program: settings apply to the session");
+        agents.put(AgentConfig { program: STAND_IN.into(), ..config("b") }, None);
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Disconnected)));
+        assert!(agents.entries.lock().unwrap()["b"].session.is_none());
     }
 }

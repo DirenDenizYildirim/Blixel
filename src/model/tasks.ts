@@ -8,6 +8,7 @@ import { sendToRealAgent } from "./real-agent";
 import { storeGet, storeSet } from "./core-api";
 import { agentById, uid, useStore } from "./store";
 import type { AgentStatus, ChatItem, Task, TaskStatus } from "./types";
+import { taskJoinsTurn } from "./usage";
 
 const get = useStore.getState;
 
@@ -25,6 +26,12 @@ useStore.subscribe((s, prev) => {
 
 function patchTask(id: string, patch: Partial<Task>) {
   useStore.setState({ tasks: get().tasks.map((t) => (t.id === id ? { ...t, ...patch, updated: Date.now() } : t)) });
+}
+
+/** Its agent starts on it: the task is "doing", and what the agent's turn spends from now on goes to it. */
+function startDoing(task: Task) {
+  patchTask(task.id, { status: "doing" });
+  if (task.agentId) taskJoinsTurn(task.agentId, task.id);
 }
 
 function addTask(t: Pick<Task, "title" | "notes" | "agentId"> & Partial<Task>): Task {
@@ -147,7 +154,7 @@ const trackedBy = (messageId: string) => get().tasks.find((t) => t.sentItemId ==
 /** A placeholder agent began the turn for this message. */
 export function taskStarted(messageId: string) {
   const task = trackedBy(messageId);
-  if (task && task.status !== "doing") patchTask(task.id, { status: "doing" });
+  if (task && task.status !== "doing") startDoing(task);
 }
 
 /** A placeholder agent's turn for this message ended; `worked` false when it did nothing with it. */
@@ -188,8 +195,9 @@ export function followRealAgent(agentId: string, status?: AgentStatus) {
     } else {
       waited.delete(task.id);
       const s = status ?? agent.status;
-      if ((s === "working" || s === "waiting") && task.status === "todo") patchTask(task.id, { status: "doing" });
-      else if (s === "idle" && task.status === "doing") {
+      // At its limit the agent is idle too: the turn that reached the limit finished.
+      if ((s === "working" || s === "waiting") && task.status === "todo") startDoing(task);
+      else if ((s === "idle" || s === "limited") && task.status === "doing") {
         tracked.delete(task.id);
         patchTask(task.id, { status: "check" });
       } else if (s === "stopped" && task.status === "doing") {
@@ -218,5 +226,7 @@ export function addHandedTask(fromId: string, toId: string, title: string, itemI
 /** The demo's opening task, which Kestrel is already working on. */
 export function followDemoTask(messageId: string) {
   const task = get().tasks.find((t) => t.sentItemId === messageId);
-  if (task) tracked.add(task.id);
+  if (!task) return;
+  tracked.add(task.id);
+  if (task.agentId) taskJoinsTurn(task.agentId, task.id);
 }

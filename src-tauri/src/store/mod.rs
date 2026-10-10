@@ -8,6 +8,7 @@ pub mod data;
 pub mod files;
 pub mod mac;
 pub mod projects;
+pub mod usage;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -166,6 +167,25 @@ impl Db {
     pub fn migrate(&self, module: &str, steps: &[&str]) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|_| "database lock poisoned")?;
         run_steps(&mut conn, module, steps).map_err(|f| f.text)
+    }
+}
+
+/// The database for code that runs outside a command: the app's own, reached
+/// through the app, or (in tests) one of their own.
+#[derive(Clone)]
+pub enum DbRef {
+    App(AppHandle),
+    #[cfg(test)]
+    Own(std::sync::Arc<Db>),
+}
+
+impl DbRef {
+    pub fn with<R>(&self, work: impl FnOnce(&Db) -> Result<R, String>) -> Result<R, String> {
+        match self {
+            DbRef::App(app) => work(app.try_state::<Db>().ok_or("The database is not open.")?.inner()),
+            #[cfg(test)]
+            DbRef::Own(db) => work(db),
+        }
     }
 }
 

@@ -43,6 +43,7 @@ export async function removeAgent(id: string): Promise<void> {
     shells: without(s.shells),
     drafts: without(s.drafts),
     presence: without(s.presence),
+    usage: without(s.usage),
     selectedId: s.selectedId === id ? (rest[0]?.id ?? null) : s.selectedId,
     following: s.following === id ? null : s.following,
     view: s.view.kind === "agent-form" && s.view.editingId === id ? { kind: "main" } : s.view,

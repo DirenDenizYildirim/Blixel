@@ -21,6 +21,9 @@ pub enum Status {
     Working,
     Waiting,
     Stopped,
+    /// Idle, and at its daily spending limit: it starts nothing new until the
+    /// limit is raised or the day ends.
+    Limited,
 }
 
 #[derive(Serialize, Clone)]
@@ -155,6 +158,15 @@ impl Events {
             .map(|(id, name, description)| serde_json::json!({ "id": id, "name": name, "description": description }))
             .collect();
         self.emit("agent://models", serde_json::json!({ "agentId": agent_id, "current": current, "models": models }));
+    }
+
+    /// What the agent spent today and in its current turn so far, in US
+    /// dollars, with its daily limit (None for no limit).
+    pub fn usage(&self, agent_id: &str, today_usd: f64, turn_usd: f64, limit_usd: Option<f64>) {
+        self.emit(
+            "agent://usage",
+            serde_json::json!({ "agentId": agent_id, "todayUsd": today_usd, "turnUsd": turn_usd, "limitUsd": limit_usd }),
+        );
     }
 
     pub fn note(&self, agent_id: &str, text: &str) {

@@ -113,6 +113,8 @@ h1, h2 { text-wrap: balance; }
 .status[data-status="waiting"] { color: var(--warn); }
 .status[data-status="waiting"] i { background: currentColor; animation: pulse 1s ease-in-out infinite; }
 .status[data-status="stopped"] { color: var(--danger-fg); }
+/* At its daily spending limit: idle, in the warning colour. */
+.status[data-status="limited"] { color: var(--warn); }
 
 /* ---- Sidebar ---- */
 .sidebar {
@@ -194,7 +196,7 @@ h1, h2 { text-wrap: balance; }
   border-radius: 50%; border: 2px solid var(--side); background: var(--muted);
 }
 .rail-dot[data-status="working"] { background: var(--ok); }
-.rail-dot[data-status="waiting"], .rail-dot[data-status="queued"] { background: var(--warn); }
+.rail-dot[data-status="waiting"], .rail-dot[data-status="queued"], .rail-dot[data-status="limited"] { background: var(--warn); }
 .rail-dot[data-status="stopped"] { background: var(--danger-fg); }
 
 /* ---- Panel dividers ---- */

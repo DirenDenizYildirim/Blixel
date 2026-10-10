@@ -1,6 +1,6 @@
 // The app's settings: its look, the editor, the layout, what new agents
-// start with, the keys, and what it is. A full page like an agent's
-// settings, with a live map of this window beside it.
+// start with, what the agents spent today, the keys, and what it is. A full
+// page like an agent's settings, with a live map of this window beside it.
 // Everything applies at once; the theme and layout remember themselves.
 
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import { KeysSettings } from "./KeysSettings";
 import { LayoutMap, useWindowSize } from "./LayoutMap";
 import { LayoutSettings } from "./LayoutSettings";
 import { NewAgentSettings } from "./NewAgentSettings";
+import { UsageSettings } from "./UsageSettings";
 import "./settings.css";
 
 const SECTIONS = [
@@ -26,6 +27,7 @@ const SECTIONS = [
   { id: "editor", label: "Editor" },
   { id: "layout", label: "Layout" },
   { id: "new-agents", label: "New agents" },
+  { id: "usage", label: "Usage" },
   { id: "keys", label: "Keys" },
   { id: "about", label: "About" },
 ] as const;
@@ -115,6 +117,7 @@ export function SettingsPage() {
           <EditorSettings />
           <LayoutSettings />
           <NewAgentSettings />
+          <UsageSettings />
           <KeysSettings />
           <About />
         </main>

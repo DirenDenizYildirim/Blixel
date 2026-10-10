@@ -20,15 +20,16 @@ export function themeSnapshot(): ThemeSnapshot {
   return { tokens, light: scheme.split(" ")[0] === "light" };
 }
 
-/** An agent as `host.agents` shows it. */
-export type AgentInfo = { id: string; name: string; hue: number; status: Agent["status"]; file: string | null };
+/** An agent as `host.agents` shows it, with the statuses the host API documents. */
+export type AgentInfo = { id: string; name: string; hue: number; status: Exclude<Agent["status"], "limited">; file: string | null };
 
 export function agentInfo(agent: Agent, presence: Record<string, Presence>): AgentInfo {
   return {
     id: agent.id,
     name: agent.name,
     hue: Math.round(hueOf(agent) * 10) / 10,
-    status: agent.status,
+    // An agent at its spending limit is idle as far as mods know: what it spends is not theirs to see.
+    status: agent.status === "limited" ? "idle" : agent.status,
     file: presence[agent.id]?.path ?? null,
   };
 }

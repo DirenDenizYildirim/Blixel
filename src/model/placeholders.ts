@@ -32,6 +32,7 @@ export const PLACEHOLDER_AGENTS: Agent[] = [
     model: "sonnet",
     status: "working",
     canGiveTo: ["moth"],
+    dailyLimit: "5",
     instructions: "You own src/agents. Keep changes small and covered by tests.",
   },
   {
@@ -124,6 +125,7 @@ export const PLACEHOLDER_TASKS: Task[] = [
     updated: started,
     sentItemId: "k1",
     flag: null,
+    cost: 0.12,
   },
   {
     id: "t-review",
@@ -139,6 +141,12 @@ export const PLACEHOLDER_TASKS: Task[] = [
   },
 ];
 
+/** What the demo's agents have spent today: made up, like everything they do. */
+const PLACEHOLDER_USAGE: ProjectData["usage"] = {
+  kestrel: { today: 0.31, turn: 0.12 },
+  moth: { today: 0.06, turn: 0 },
+};
+
 /** The demo as it starts, every time it opens. Nothing in it is saved. */
 export function demoProject(): ProjectData {
   return {
@@ -149,6 +157,7 @@ export function demoProject(): ProjectData {
     chats: PLACEHOLDER_CHATS,
     shells: Object.fromEntries(Object.entries(PLACEHOLDER_SHELLS).map(([id, s]) => [id, { ...s, total: s.data.length }])),
     tasks: PLACEHOLDER_TASKS,
+    usage: PLACEHOLDER_USAGE,
     selectedId: "kestrel",
     following: "kestrel",
     drafts: {},

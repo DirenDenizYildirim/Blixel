@@ -12,7 +12,12 @@ run on an opened folder through Blixel's own tools.
 - `npm run build` type-checks and bundles; `cd src-tauri && cargo test` runs
   the Rust tests. `cargo test -- --ignored` also starts the real Claude adapter
   with a dummy key (network, about 250 MB on first run) and checks the fallback
-  model ids against it.
+  model ids against it. Plain `cargo test` also builds the app binary, which
+  the end-to-end tests start in its stand-in agent mode (no key, no network).
+- In development builds the agent form offers the **stand-in** program: a
+  test agent that follows plain instructions instead of a model (see
+  `src/components/StandInHelp.tsx`), so the real agent path can be tried
+  without a key.
 
 ## Code map
 
@@ -21,8 +26,8 @@ run on an opened folder through Blixel's own tools.
   is shared with the Rust core; its adapter test checks `fallback-models.json`.
   Projects (`projects.ts`), saving and loading (`persist.ts`), tasks
   (`tasks.ts`), agent actions (`agent-actions.ts`), app settings
-  (`app-settings.ts`), and typed wrappers for the core's data commands
-  (`core-api.ts`).
+  (`app-settings.ts`), today's spending per agent (`usage.ts`), and typed
+  wrappers for the core's data commands (`core-api.ts`).
 - `src/editor/`: CodeMirror buffers shared by the user and agents, agent
   cursors and line marks, the typing replay, and conflicts between agent
   edits and unsaved changes (`sessions.ts`).
@@ -45,8 +50,11 @@ run on an opened folder through Blixel's own tools.
 - `src-tauri/src/agents/`: real agents. `session.rs` runs the Claude adapter
   over ACP with its built-in edit and shell tools off; `tools.rs` is Blixel's
   MCP tool server (edit, write, bash) that enforces each agent's settings;
-  `permissions.rs` holds questions for the user. `src/model/real-agent.ts` is
-  the interface side.
+  `permissions.rs` holds questions for the user; `usage.rs` counts spending
+  and enforces each agent's daily limit; `end_to_end.rs` tests the whole
+  path with the stand-in. `src/model/real-agent.ts` is the interface side.
+- `src-tauri/src/stand_in.rs`: the stand-in agent (the app binary run with
+  `--stand-in-agent`, debug builds only).
 - `src-tauri/src/secrets.rs`: API keys and other secrets in the system keychain.
 - `src-tauri/src/store/`: the SQLite database in the app data folder
   (projects, saved agents with a keyed check, documents and item lists for

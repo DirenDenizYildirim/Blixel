@@ -35,6 +35,12 @@ export interface ShellState {
   total: number;
 }
 
+/** What an agent has spent, in dollars: today, and in its current turn so far. */
+export interface AgentUsage {
+  today: number;
+  turn: number;
+}
+
 /** How much of each agent's shell output is kept; older lines are dropped. */
 const SHELL_KEEP = 1_000_000;
 
@@ -48,6 +54,8 @@ export interface ProjectData {
   chats: Record<string, ChatItem[]>;
   shells: Record<string, ShellState>;
   tasks: Task[];
+  /** Today's spending per agent; agents that spent nothing may be missing. */
+  usage: Record<string, AgentUsage>;
   selectedId: string | null;
   following: string | null;
   drafts: Record<string, string>;
@@ -82,6 +90,8 @@ interface State {
   /** Agents whose saved record was changed outside the app: every Allow became Ask until the user reviews them. */
   agentTrust: Record<string, "changed-outside">;
   tasks: Task[];
+  /** What each agent spent today and in its current turn (usage.ts); agents that spent nothing may be missing. */
+  usage: Record<string, AgentUsage>;
   /** The models each program offers: reported by a running agent, or the fallback list. */
   models: Record<Program, ModelChoice[]>;
   selectedId: string | null;
@@ -126,6 +136,7 @@ export const useStore = create<State>(() => ({
   agents: demo.agents,
   agentTrust: demo.agentTrust,
   tasks: demo.tasks,
+  usage: demo.usage,
   models: FALLBACK_MODELS,
   selectedId: demo.selectedId,
   chats: demo.chats,

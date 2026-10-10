@@ -9,7 +9,7 @@ import { hueOf, notify, openFile, selectAgent, showView, toggleFiles, toggleFold
 import { PROGRAM_LABELS, type Agent, type AgentStatus, type TreeEntry } from "../model/types";
 import { agentColor } from "../theme/theme";
 import { AgentMenu } from "./AgentMenu";
-import { StatusLabel } from "./controls";
+import { StatusLabel, statusText } from "./controls";
 import {
   AgentsIcon,
   ChevronDown,
@@ -36,6 +36,8 @@ export function avatarMode(status: AgentStatus) {
 
 export function agentSubline(agent: Pick<Agent, "program" | "runsOn">) {
   const program = PROGRAM_LABELS[agent.program];
+  // The stand-in needs no key: saying "API key" would mislead.
+  if (agent.program === "stand-in") return program;
   if (agent.runsOn === "api-key") return `${program}, API key`;
   if (agent.runsOn === "self-hosted") return `${program}, local`;
   return program;
@@ -69,7 +71,6 @@ export function AgentRow(props: { agent: Agent; current?: boolean; unreviewed?: 
 const search = () => void runCommand("palette.open").catch(() => notify("Search comes in a later milestone."));
 
 const newAgentPage = (view: View) => view.kind === "agent-form" && !view.editingId;
-const statusText = (a: Agent) => (a.status === "waiting" ? "needs you" : a.status);
 
 export function Sidebar() {
   const collapsed = useLayout((l) => l.nav.collapsed);
@@ -279,7 +280,7 @@ function SidebarRail({ side }: { side: "left" | "right" }) {
 function RailAgent({ agent: a, current, unreviewed }: { agent: Agent; current: boolean; unreviewed: boolean }) {
   const [menu, setMenu] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
-  const label = `${a.name}, ${statusText(a)}${unreviewed ? `. ${UNREVIEWED}` : ""}`;
+  const label = `${a.name}, ${statusText(a.status)}${unreviewed ? `. ${UNREVIEWED}` : ""}`;
   return (
     <>
       <button

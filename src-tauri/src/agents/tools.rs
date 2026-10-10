@@ -855,6 +855,8 @@ mod tests {
             connectors: Default::default(),
             model: "test".into(),
             effort: "medium".into(),
+            program: String::new(),
+            daily_limit: String::new(),
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
         let cancel = CancellationToken::new();
@@ -949,6 +951,8 @@ mod tests {
             connectors: Default::default(),
             model: "test".into(),
             effort: "medium".into(),
+            program: String::new(),
+            daily_limit: String::new(),
         };
         let rt = AgentRuntime::new(config, Events::to_sink(|_, _| {}), Arc::new(Broker::default()));
         let tools = BlixelTools::new(rt.clone(), root);
@@ -1081,6 +1085,8 @@ mod tests {
             connectors: Default::default(),
             model: "test".into(),
             effort: "medium".into(),
+            program: String::new(),
+            daily_limit: String::new(),
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
         let args = |pidfile: &Path| BashArgs { command: sleeper(pidfile), timeout: None, description: None, run_in_background: false };

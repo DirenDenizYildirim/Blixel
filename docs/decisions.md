@@ -290,3 +290,25 @@ research agent.
   app still starts; permission requests are cleaned of hidden characters and
   wrap instead of hiding text; a connector's error output never reaches the
   agent; connector tool schemas are cleaned in full and shown for approval.
+
+## 10. Spending limits and a stand-in agent (2026-10-10)
+
+At the owner's request, before a real API key goes in; design by Claude.
+
+- **Usage:** the core records what each agent spends per day, from the cost
+  Claude Code reports after every turn (a running total per session, so the
+  core counts the differences and notices when a rebuilt session starts
+  again from zero). Today's spend shows in the chat head, the agent's
+  settings, a Usage list in Settings, and on each task.
+- **Daily limit:** enforced by the core. At the limit the agent starts no
+  new turn, shows "at limit", and queued messages go back to the message
+  box with the reason; the turn that crosses the limit finishes rather than
+  being cut off midway. Not chosen: stopping a turn at the limit (it would
+  leave edits and commands half done).
+- **Stand-in agent:** a small test program that speaks the same protocol as
+  Claude Code but follows plain instructions (say, edit, run, call a
+  connector, ask, report a cost, wait), run by the core exactly like a real
+  agent and with no key. It is offered only in development builds, and it
+  drives end-to-end tests of the real agent path without network or cost.
+  Not chosen: mocking inside the core (it would skip the protocol, the tool
+  server and the gateway, which are what need testing).

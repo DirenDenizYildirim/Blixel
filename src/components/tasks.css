@@ -41,6 +41,8 @@
 }
 .task[data-status="done"] .task-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
 .task-give { flex: none; white-space: nowrap; }
+/* What its agent's turns spent on it. */
+.task-cost { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .task-more { flex: none; opacity: 0; }
 .task:hover .task-more, .task:focus-within .task-more, .task-more[aria-expanded="true"] { opacity: 1; }
 /* Lines under a task start where its title does. */

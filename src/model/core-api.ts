@@ -1,5 +1,5 @@
 // The core's commands for saved data: the database (settings, chats, tasks),
-// projects, file copies, agents and connectors. Outside the desktop app
+// projects, file copies, agents, spending and connectors. Outside the desktop app
 // (npm run dev) there is no core: data lives in memory for the session, and
 // what needs the core (projects on disk, connectors) says so.
 
@@ -178,6 +178,14 @@ export function agentsList(projectId: string): Promise<SavedAgent[]> {
 export function agentRemove(projectId: string, agentId: string): Promise<void> {
   if (!inTauri) return Promise.resolve();
   return invoke<void>("agent_remove", { projectId, agentId });
+}
+
+// ---- Spending ----
+
+/** What each of a project's agents has spent today, in dollars, by agent id. Agents that spent nothing may be missing. */
+export function usageToday(projectId: string): Promise<Record<string, number>> {
+  if (!inTauri) return Promise.resolve({});
+  return invoke<Record<string, number>>("usage_today", { projectId });
 }
 
 // ---- Connectors ----
