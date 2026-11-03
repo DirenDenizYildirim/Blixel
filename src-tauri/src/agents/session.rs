@@ -3,7 +3,8 @@
 //! own edit and shell tools switched off, and relays prompts and updates.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::time::Duration;
@@ -64,6 +65,49 @@ pub enum Launch {
     /// The stand-in (`crate::stand_in`): this app's own binary started with
     /// `STAND_IN_FLAG`, which only debug builds have. Tests pass the built app.
     StandIn { exe: PathBuf },
+}
+
+/// Inherited variables whose names start with these are kept from Claude Code:
+/// they can send its requests to another server (`ANTHROPIC_BASE_URL`), sign
+/// it in with another credential (`ANTHROPIC_AUTH_TOKEN`, or a subscription's
+/// `CLAUDE_CODE_OAUTH_TOKEN`, which Anthropic does not allow other apps to
+/// use), bill another provider (`CLAUDE_CODE_USE_BEDROCK`) or change how it
+/// runs. A prefix rather than a list, so variables added later are covered.
+const PROVIDER_PREFIXES: [&str; 2] = ["ANTHROPIC", "CLAUDE"];
+
+/// Claude Code through the pinned adapter, with only the key Blixel holds.
+/// `inherited` names the variables of Blixel's own environment, which the
+/// child would otherwise receive.
+fn claude_code_program(api_key: &str, config_dir: &Path, inherited: impl Iterator<Item = OsString>) -> AcpAgentConfig {
+    // No ANTHROPIC_MODEL: the adapter would put the session back on it at
+    // every resume. The model is set through the session's config options.
+    let own = AcpAgentConfig::new("npx")
+        .env("ANTHROPIC_API_KEY", api_key)
+        // Each agent gets its own Claude Code configuration, so nothing in
+        // the user's ~/.claude (permission mode, allow rules, hooks, a
+        // stored subscription login) applies.
+        .env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
+        .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        // Keep npm quiet so its notices never reach the protocol stream.
+        .env("npm_config_update_notifier", "false")
+        .env("npm_config_fund", "false");
+    // The protocol library can add variables to the child but not remove
+    // inherited ones, so `env -u` removes them and then becomes npx (same
+    // process, so stopping its process group still stops the adapter). The
+    // variables set above reach `env` too, so they are not removed.
+    let mut removed: Vec<String> = inherited
+        .filter_map(|name| name.into_string().ok())
+        .filter(|name| PROVIDER_PREFIXES.iter().any(|p| name.starts_with(p)))
+        .filter(|name| !own.environment().contains_key(name))
+        .collect();
+    removed.sort();
+    removed.dedup();
+    let mut program = AcpAgentConfig::new("env");
+    for name in removed {
+        program = program.args(["-u".to_string(), name]);
+    }
+    program.args(["npx", "-y", ADAPTER]).envs(own.environment().clone())
 }
 
 pub enum Command {
@@ -157,20 +201,7 @@ pub async fn run(
     let stderr: Arc<Mutex<VecDeque<String>>> = Arc::default();
     let claude_code = matches!(launch, Launch::ClaudeCode { .. });
     let program = match launch {
-        // No ANTHROPIC_MODEL: the adapter would put the session back on it at
-        // every resume. The model is set through the session's config options.
-        Launch::ClaudeCode { api_key } => AcpAgentConfig::new("npx")
-            .args(["-y", ADAPTER])
-            .env("ANTHROPIC_API_KEY", api_key)
-            // Each agent gets its own Claude Code configuration, so nothing in
-            // the user's ~/.claude (permission mode, allow rules, hooks, a
-            // stored subscription login) applies; only the API key is used.
-            .env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
-            .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-            // Keep npm quiet so its notices never reach the protocol stream.
-            .env("npm_config_update_notifier", "false")
-            .env("npm_config_fund", "false"),
+        Launch::ClaudeCode { api_key } => claude_code_program(&api_key, &config_dir, std::env::vars_os().map(|(name, _)| name)),
         // It keeps its sessions in the same folder Claude Code would.
         Launch::StandIn { exe } => {
             AcpAgentConfig::new(exe).arg(crate::STAND_IN_FLAG).env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
@@ -731,6 +762,84 @@ mod tests {
     fn prompt_of(rt: &AgentRuntime) -> String {
         let options = session_options(rt, &std::env::temp_dir(), &[]);
         options["systemPrompt"]["append"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn claude_code_drops_inherited_provider_variables() {
+        let inherited = [
+            "PATH",
+            "HOME",
+            "HTTPS_PROXY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDECODE",
+            // Set by Blixel as well: its own values win, so these stay.
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CONFIG_DIR",
+            "ANTHROPIC_BASE_URL",
+        ];
+        let config = claude_code_program("sk-test", Path::new("/tmp/cfg"), inherited.iter().map(OsString::from));
+        assert_eq!(config.command(), Path::new("env"));
+        let expected: Vec<String> = [
+            "-u",
+            "ANTHROPIC_AUTH_TOKEN",
+            "-u",
+            "ANTHROPIC_BASE_URL",
+            "-u",
+            "CLAUDECODE",
+            "-u",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "-u",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "npx",
+            "-y",
+            ADAPTER,
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(config.arguments(), expected.as_slice());
+        assert_eq!(config.environment()["ANTHROPIC_API_KEY"], "sk-test");
+        assert_eq!(config.environment()["CLAUDE_CONFIG_DIR"], "/tmp/cfg");
+    }
+
+    /// Runs the launch line with `env` printing what the adapter would get,
+    /// in place of npx, from an environment that has a different server and a
+    /// subscription login set.
+    #[cfg(unix)]
+    #[test]
+    fn claude_code_gets_only_blixels_credentials() {
+        let planted = [("ANTHROPIC_BASE_URL", "https://elsewhere.invalid"), ("CLAUDE_CODE_OAUTH_TOKEN", "subscription")];
+        let inherited = std::env::vars_os().map(|(name, _)| name).chain(planted.iter().map(|(name, _)| OsString::from(name)));
+        let config = claude_code_program("sk-test", Path::new("/tmp/cfg"), inherited);
+        let args = config.arguments();
+        let npx = args.iter().position(|a| a == "npx").expect("npx in the launch line");
+        let output = std::process::Command::new(config.command())
+            .args(&args[..npx])
+            .arg("env")
+            .envs(planted)
+            .envs(config.environment())
+            .output()
+            .expect("env runs");
+        assert!(output.status.success());
+        let seen = String::from_utf8_lossy(&output.stdout);
+        let mut provider: Vec<&str> = seen
+            .lines()
+            .filter(|line| PROVIDER_PREFIXES.iter().any(|p| line.starts_with(p)))
+            .map(|line| line.split('=').next().unwrap())
+            .collect();
+        let mut expected = vec![
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "CLAUDE_CONFIG_DIR",
+        ];
+        provider.sort();
+        expected.sort();
+        assert_eq!(provider, expected, "the adapter would see:\n{seen}");
+        assert!(seen.lines().any(|l| l == "ANTHROPIC_API_KEY=sk-test"));
+        assert!(seen.lines().any(|l| l.starts_with("PATH=")), "other variables are kept");
     }
 
     #[test]
