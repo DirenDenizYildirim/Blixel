@@ -67,6 +67,7 @@ function blankAgent(taken: string[]): Agent {
     readNotes: defaults.readNotes,
     permissions: { ...defaults.permissions },
     editPaths: "",
+    network: defaults.network,
     rulePacks: [],
     connectors: {},
     canMessage: true,
@@ -101,6 +102,8 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
   const others = agents.filter((a) => a.id !== draft.id);
   const nameTaken = others.some((a) => a.name.trim().toLowerCase() === draft.name.trim().toLowerCase());
   const real = editing ? !editing.placeholder : canRunForReal(draft);
+  // A running agent keeps the instructions its conversation started with, so changing them starts a new one.
+  const newConversation = editing && real && toldOf(editing) !== toldOf(draft) ? editing.name : null;
   const limit = parseLimit(draft.dailyLimit);
   const problem = !draft.name.trim()
     ? "Give it a name."
@@ -266,7 +269,7 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
           </label>
           <div className="top12">
             <Switch
-              label="Give it the project notes (CLAUDE.md, AGENTS.md) when it starts"
+              label="Give it the project notes (CLAUDE.md, AGENTS.md) when a conversation starts"
               checked={draft.readNotes}
               onChange={(v) => set("readNotes", v)}
             />
@@ -323,8 +326,23 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
                   )}
                 </div>
               )}
+              {tool === "push" && real && (
+                <div className="area-row">
+                  <span className="label">
+                    Commit and push do not work for real agents yet: their commands see git's folder read-only, so you
+                    commit their work.
+                  </span>
+                </div>
+              )}
             </div>
           ))}
+          <div className="net-row">
+            <Switch label="Commands may use the network" checked={draft.network} onChange={(v) => set("network", v)} />
+            <div className="hint-line">
+              Commands run in a sandbox: they can change only this project's folder and cannot see the rest of your home
+              folder.
+            </div>
+          </div>
           <AgentConnectors draft={draft} setDraft={setDraft} />
           <div className="tool-foot label">
             Changes to agent settings and instruction files, and to git's own folder, always ask you first:{" "}
@@ -427,6 +445,7 @@ export function AgentForm({ editingId }: { editingId: string | null }) {
         editing={Boolean(editing)}
         reviewing={changedOutside}
         real={real}
+        newConversation={newConversation}
         onSubmit={() => void submit()}
       />
     </div>
@@ -577,6 +596,14 @@ function attachedCopy(p: AvailableRulePack): AttachedRulePack {
   };
 }
 
+/**
+ * What the agent is told when a conversation starts, as the core compares it
+ * (session.rs, instructions_hash): its name, instructions, the project notes
+ * on or off, and its rule packs' text.
+ */
+const toldOf = (a: Pick<Agent, "name" | "instructions" | "readNotes" | "rulePacks">) =>
+  JSON.stringify([a.name.trim(), a.instructions.trim(), a.readNotes, a.rulePacks.map((r) => [r.label.trim(), r.instructions.trim()])]);
+
 const samePack = (a: { modId: string; packId: string }, b: { modId: string; packId: string }) =>
   a.modId === b.modId && a.packId === b.packId;
 
@@ -696,6 +723,8 @@ function Preview(props: {
   /** Its saved settings were changed outside the app: saving is the user's review. */
   reviewing: boolean;
   real: boolean;
+  /** The agent's name, when saving starts it on a new conversation. */
+  newConversation: string | null;
   onSubmit: () => void;
 }) {
   const { draft } = props;
@@ -786,6 +815,12 @@ function Preview(props: {
             ))}
           </div>
         )}
+        {draft.permissions.run !== "off" && (
+          <div>
+            <span className="muted bold">Commands </span>
+            <span>run in a sandbox, {draft.network ? "with" : "without"} network access</span>
+          </div>
+        )}
         {draft.rulePacks.length > 0 && (
           <div>
             <span className="muted bold">Rules from mods </span>
@@ -796,6 +831,12 @@ function Preview(props: {
 
       <div className="form-actions">
         {props.problem && <div className="form-problem">{props.problem}</div>}
+        {props.newConversation && (
+          <div className="label">
+            Saving starts a new conversation for {props.newConversation}: its instructions changed, so it will not
+            remember earlier messages.
+          </div>
+        )}
         {!props.real && (
           <div className="label">Only Claude Code with an API key runs for real so far; this agent will be a scripted placeholder.</div>
         )}

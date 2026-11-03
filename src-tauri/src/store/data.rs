@@ -53,6 +53,11 @@ pub const SCHEMA: &[&str] = &["
     -- The keyed check on a project's name and folder (projects.rs). Rows made
     -- before it have none, so they ask the user to confirm their folder once.
     ALTER TABLE projects ADD COLUMN mac TEXT NOT NULL DEFAULT '';
+", "
+    -- Which instructions an agent's saved session started with (a hash, see
+    -- agents::session::instructions_hash): Claude Code keeps those when a
+    -- session is resumed, so other instructions need a new conversation.
+    ALTER TABLE agents ADD COLUMN session_instructions TEXT;
 "];
 
 /// Milliseconds since 1970, as the interface counts time.

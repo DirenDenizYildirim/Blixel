@@ -3,13 +3,15 @@
 //! own edit and shell tools switched off, and relays prompts and updates.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, HttpHeader, InitializeRequest, McpServer, McpServerHttp, NewSessionRequest,
+    CancelNotification, CloseSessionRequest, ContentBlock, HttpHeader, InitializeRequest, McpServer, McpServerHttp,
+    NewSessionRequest,
     PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigKind,
     SessionConfigOption, SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
@@ -25,7 +27,8 @@ use crate::events::{new_id, Activity};
 
 use super::permissions::Answer;
 use super::runtime::AgentRuntime;
-use super::settings::{Setting, Tool};
+use super::sandbox::Sandbox;
+use super::settings::{AgentConfig, Setting, Tool};
 use super::tools::{self, BlixelTools, SERVER_NAME, TOOL_NAMES};
 use super::usage::Meter;
 
@@ -65,6 +68,61 @@ pub enum Launch {
     /// `STAND_IN_FLAG`, which only debug builds have. Tests pass the built app.
     StandIn { exe: PathBuf },
 }
+
+/// Inherited variables whose names start with these are kept from Claude Code:
+/// they can send its requests to another server (`ANTHROPIC_BASE_URL`), sign
+/// it in with another credential (`ANTHROPIC_AUTH_TOKEN`, or a subscription's
+/// `CLAUDE_CODE_OAUTH_TOKEN`, which Anthropic does not allow other apps to
+/// use), bill another provider (`CLAUDE_CODE_USE_BEDROCK`) or change how it
+/// runs. A prefix rather than a list, so variables added later are covered.
+const PROVIDER_PREFIXES: [&str; 2] = ["ANTHROPIC", "CLAUDE"];
+
+/// Claude Code through the pinned adapter, with only the key Blixel holds.
+/// `inherited` names the variables of Blixel's own environment, which the
+/// child would otherwise receive.
+fn claude_code_program(api_key: &str, config_dir: &Path, inherited: impl Iterator<Item = OsString>) -> AcpAgentConfig {
+    // No ANTHROPIC_MODEL: the adapter would put the session back on it at
+    // every resume. The model is set through the session's config options.
+    let own = AcpAgentConfig::new("npx")
+        .env("ANTHROPIC_API_KEY", api_key)
+        // Each agent gets its own Claude Code configuration, so nothing in
+        // the user's ~/.claude (permission mode, allow rules, hooks, a
+        // stored subscription login) applies.
+        .env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
+        .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        // Keep npm quiet so its notices never reach the protocol stream.
+        .env("npm_config_update_notifier", "false")
+        .env("npm_config_fund", "false");
+    // The protocol library can add variables to the child but not remove
+    // inherited ones, so `env -u` removes them and then becomes npx (same
+    // process, so stopping its process group still stops the adapter). The
+    // variables set above reach `env` too, so they are not removed.
+    let mut removed: Vec<String> = inherited
+        .filter_map(|name| name.into_string().ok())
+        .filter(|name| PROVIDER_PREFIXES.iter().any(|p| name.starts_with(p)))
+        .filter(|name| !own.environment().contains_key(name))
+        .collect();
+    removed.sort();
+    removed.dedup();
+    let mut program = AcpAgentConfig::new("env");
+    for name in removed {
+        program = program.args(["-u".to_string(), name]);
+    }
+    program.args(["npx", "-y", ADAPTER]).envs(own.environment().clone())
+}
+
+/// An agent's session from an earlier run, and the hash of the instructions
+/// it started with (`instructions_hash`; None if not known).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Earlier {
+    pub id: String,
+    pub instructions: Option<String>,
+}
+
+/// Hears each session the agent works in, with the hash of its instructions,
+/// once a message was sent in it, so it can be carried on next time.
+pub type OnSession = Box<dyn Fn(&str, &str) + Send + Sync>;
 
 pub enum Command {
     /// A message from the user, with the id of its chat bubble.
@@ -130,18 +188,20 @@ struct Logged {
 }
 
 /// Runs until the agent process exits or the command channel closes.
-/// `resume` is the agent's session from an earlier run, to carry on its
-/// conversation; `on_session` hears the session id once it is known, so it
-/// can be kept for next time. `hub` serves the agent's connectors.
+/// `resume` is the agent's session from an earlier run, carried on if it
+/// started with the instructions the agent has now; `on_session` hears each
+/// session the agent sends a message in, so it can be kept for next time. `hub` serves
+/// the agent's connectors; `sandbox` is where its commands run.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     rt: Arc<AgentRuntime>,
     root: PathBuf,
     config_dir: PathBuf,
     launch: Launch,
+    sandbox: Sandbox,
     hub: Arc<crate::connectors::Hub>,
-    resume: Option<String>,
-    on_session: Box<dyn Fn(&str) + Send + Sync>,
+    resume: Option<Earlier>,
+    on_session: OnSession,
     mut commands: mpsc::UnboundedReceiver<Command>,
 ) -> Result<(), String> {
     std::fs::create_dir_all(&config_dir).map_err(|e| format!("could not create {}: {e}", config_dir.display()))?;
@@ -150,27 +210,15 @@ pub async fn run(
     let _stop_on_exit = server_stop.clone().drop_guard();
     // The connectors this agent may use, each served beside Blixel's tools.
     let gateway = Gateway::new(hub, rt.clone());
-    let addr = tools::serve(BlixelTools::new(rt.clone(), root.clone()), gateway.router(), token.clone(), server_stop.clone())
+    let tools = BlixelTools::new(rt.clone(), root.clone(), Arc::new(sandbox));
+    let addr = tools::serve(tools, gateway.router(), token.clone(), server_stop.clone())
         .await
         .map_err(|e| format!("could not start Blixel's tools: {e}"))?;
 
     let stderr: Arc<Mutex<VecDeque<String>>> = Arc::default();
     let claude_code = matches!(launch, Launch::ClaudeCode { .. });
     let program = match launch {
-        // No ANTHROPIC_MODEL: the adapter would put the session back on it at
-        // every resume. The model is set through the session's config options.
-        Launch::ClaudeCode { api_key } => AcpAgentConfig::new("npx")
-            .args(["-y", ADAPTER])
-            .env("ANTHROPIC_API_KEY", api_key)
-            // Each agent gets its own Claude Code configuration, so nothing in
-            // the user's ~/.claude (permission mode, allow rules, hooks, a
-            // stored subscription login) applies; only the API key is used.
-            .env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
-            .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-            // Keep npm quiet so its notices never reach the protocol stream.
-            .env("npm_config_update_notifier", "false")
-            .env("npm_config_fund", "false"),
+        Launch::ClaudeCode { api_key } => claude_code_program(&api_key, &config_dir, std::env::vars_os().map(|(name, _)| name)),
         // It keeps its sessions in the same folder Claude Code would.
         Launch::StandIn { exe } => {
             AcpAgentConfig::new(exe).arg(crate::STAND_IN_FLAG).env("CLAUDE_CONFIG_DIR", config_dir.display().to_string())
@@ -235,27 +283,36 @@ pub async fn run(
                 let exposed = gateway.refresh().await;
                 let mut servers = server_list(addr, &token, &exposed);
                 let mut applied = session_options(&rt, &root, &exposed);
+                // What the model is told when a conversation starts: Claude
+                // Code keeps that when a session is resumed with other
+                // instructions, so a session is carried on only if it started
+                // with the instructions the agent has now.
+                let mut told = instructions_hash(&rt.config());
+                let can_close = init.agent_capabilities.session_capabilities.close.is_some();
 
                 // Carry on the agent's earlier conversation when there is one.
                 let can_resume = init.agent_capabilities.session_capabilities.resume.is_some();
                 let mut resumed = None;
-                if let Some(id) = resume {
-                    if can_resume {
-                        let mut request = ResumeSessionRequest::new(id.clone(), root.clone());
+                if let Some(earlier) = resume {
+                    let same = earlier.instructions.as_deref() == Some(told.as_str());
+                    if can_resume && same {
+                        let mut request = ResumeSessionRequest::new(earlier.id.clone(), root.clone());
                         request.mcp_servers = servers.clone();
                         request.meta = Some(applied.clone());
                         if let Ok(r) = conn.send_request(request).block_task().await {
-                            resumed = Some((SessionId::new(id), r.config_options.unwrap_or_default()));
+                            resumed = Some((SessionId::new(earlier.id), r.config_options.unwrap_or_default()));
                         }
                     }
                     if resumed.is_none() {
-                        rt.events.note(&rt.id, &format!(
-                            "{} starts a new conversation; earlier messages are from a previous session.",
-                            rt.name()
-                        ));
+                        rt.events.note(&rt.id, &if earlier.instructions.is_some() && !same {
+                            new_instructions_note(&rt.name())
+                        } else {
+                            format!("{} starts a new conversation; earlier messages are from a previous session.", rt.name())
+                        });
                     }
                 }
-                let (session_id, mut choices) = match resumed {
+                let carried_on = resumed.is_some();
+                let (mut session_id, mut choices) = match resumed {
                     Some(r) => r,
                     None => {
                         let mut request = NewSessionRequest::new(root.clone());
@@ -265,7 +322,10 @@ pub async fn run(
                         (session.session_id, session.config_options.unwrap_or_default())
                     }
                 };
-                on_session(&session_id.0);
+                // A session is kept for next time once a message was sent in
+                // it: before that the program has nothing to resume. One
+                // carried on from before has its conversation already.
+                let mut kept: Option<SessionId> = carried_on.then(|| session_id.clone());
                 sync_choices(&rt, &conn, &session_id, &mut choices).await;
                 rt.refresh_status();
                 if claude_code && rt.config().permissions.get(Tool::Read) == Setting::Ask {
@@ -307,7 +367,43 @@ pub async fn run(
                         let exposed = gateway.refresh().await;
                         let wanted = session_options(&rt, &root, &exposed);
                         let wanted_servers = server_list(addr, &token, &exposed);
-                        if wanted != applied || wanted_servers != servers {
+                        let wanted_told = instructions_hash(&rt.config());
+                        // The project notes' text is not compared: it is read when a conversation starts.
+                        let options_changed = wanted.get("claudeCode") != applied.get("claudeCode") || wanted_servers != servers;
+                        let used = kept.as_ref() == Some(&session_id);
+                        if wanted_told != told || (options_changed && !used) {
+                            // A resumed session would keep its old instructions: a new
+                            // conversation gets the new ones. A session not used yet has
+                            // no conversation to keep, and cannot be resumed.
+                            let mut request = NewSessionRequest::new(root.clone());
+                            request.mcp_servers = wanted_servers.clone();
+                            request.meta = Some(wanted.clone());
+                            match conn.send_request(request).block_task().await {
+                                Ok(new) => {
+                                    if can_close {
+                                        // Ends the old session's Claude Code process; it is not used again.
+                                        let close = CloseSessionRequest::new(session_id.clone());
+                                        if let Err(e) = conn.send_request(close).block_task().await {
+                                            eprintln!("blixel: could not close session {}: {e}", session_id.0);
+                                        }
+                                    }
+                                    session_id = new.session_id;
+                                    choices = new.config_options.unwrap_or_default();
+                                    applied = wanted;
+                                    servers = wanted_servers;
+                                    let renewed = wanted_told != told;
+                                    told = wanted_told;
+                                    turn.lock().expect("turn lock").meter = Meter::default();
+                                    rt.events.note(&rt.id, &if renewed {
+                                        new_instructions_note(&rt.name())
+                                    } else {
+                                        format!("{} now works with your new settings.", rt.name())
+                                    });
+                                }
+                                // The old session goes on, with the instructions and settings it had.
+                                Err(e) => rt.events.note(&rt.id, &format!("Your new settings could not be applied yet: {e}")),
+                            }
+                        } else if options_changed {
                             let mut resume = ResumeSessionRequest::new(session_id.clone(), root.clone());
                             resume.mcp_servers = wanted_servers.clone();
                             resume.meta = Some(wanted.clone());
@@ -334,6 +430,10 @@ pub async fn run(
 
                     rt.set_turn_active(true);
                     rt.usage.start_turn();
+                    if kept.as_ref() != Some(&session_id) {
+                        on_session(&session_id.0, &told);
+                        kept = Some(session_id.clone());
+                    }
                     let prompt = PromptRequest::new(session_id.clone(), vec![ContentBlock::Text(TextContent::new(text))]);
                     let response = conn.send_request(prompt).block_task();
                     tokio::pin!(response);
@@ -444,40 +544,16 @@ fn session_options(rt: &AgentRuntime, root: &std::path::Path, exposed: &[Exposed
     } else {
         tools.extend(BUILT_IN_READERS);
     }
-    let mut append = format!(
-        "You are {name}, an agent in Blixel, a workspace where a person and several agents work on one \
-         project folder together. Your built-in Bash, Edit and Write tools are replaced by the \
-         mcp__{SERVER_NAME}__bash, mcp__{SERVER_NAME}__edit and mcp__{SERVER_NAME}__write tools, which take \
-         the same inputs: use them for every command and file change. The user watches your edits typed \
-         into their editor and your commands in your shell. Some actions may need the user's permission; \
-         if a tool says something is not allowed, do not try to get around it, ask the user instead.",
-        name = config.name
-    );
-    if !config.instructions.trim().is_empty() {
-        append.push_str("\n\nThe user's instructions for you:\n");
-        append.push_str(config.instructions.trim());
-    }
-    // Rule packs the user attached, after the user's own instructions and
-    // fenced off: their text comes from third-party mods. Changing one changes
-    // this text, so the session is rebuilt like for any instruction change.
-    let packs: Vec<(String, String)> = config
-        .rule_packs
-        .iter()
-        .filter_map(|pack| {
-            let rules = pack.instructions();
-            let rules = rules.trim();
-            (!rules.is_empty()).then(|| (pack.label(), rules.chars().take(MAX_PACK_CHARS).collect()))
-        })
-        .collect();
-    if !packs.is_empty() {
-        append.push_str(&format!("\n\n<{MOD_RULES}>\n{MOD_RULES_INTRO}"));
-        for (label, rules) in &packs {
-            append.push_str(&format!("\n\nRules from {} (a mod):\n{}", defuse(label), defuse(rules)));
-        }
-        append.push_str(&format!("\n</{MOD_RULES}>"));
-    }
+    let mut append = instructions(&config);
+    // The project notes' text as it is now; it reaches the model only when a
+    // conversation starts (see `instructions_hash`).
     if config.read_notes {
+        // A notes file a running command may have made is not the user's yet.
+        let pending = super::sandbox::pending(root);
         for file in ["CLAUDE.md", "AGENTS.md"] {
+            if pending.contains(file) {
+                continue;
+            }
             if let Ok(text) = std::fs::read_to_string(root.join(file)) {
                 append.push_str(&format!("\n\nProject notes from {file}:\n"));
                 append.push_str(&text.chars().take(20_000).collect::<String>());
@@ -508,6 +584,64 @@ fn session_options(rt: &AgentRuntime, root: &std::path::Path, exposed: &[Exposed
     meta.insert("systemPrompt".into(), serde_json::json!({ "append": append }));
     meta.insert("claudeCode".into(), serde_json::json!({ "options": options }));
     meta
+}
+
+/// What the model is told about itself besides Claude Code's own prompt: who
+/// it is, the user's instructions for it, and the rule packs' text. The
+/// project notes come after it.
+fn instructions(config: &AgentConfig) -> String {
+    let mut text = format!(
+        "You are {name}, an agent in Blixel, a workspace where a person and several agents work on one \
+         project folder together. Your built-in Bash, Edit and Write tools are replaced by the \
+         mcp__{SERVER_NAME}__bash, mcp__{SERVER_NAME}__edit and mcp__{SERVER_NAME}__write tools, which take \
+         the same inputs: use them for every command and file change. The user watches your edits typed \
+         into their editor and your commands in your shell. Your commands run in a sandbox: they can change \
+         files only inside the project folder (not git's folder, so you cannot commit, nor the files that \
+         instruct agents), see only the tool folders of the user's home folder, and may have no network. Some actions may need the user's permission; if a tool says something is not \
+         allowed, or a command fails for lack of access, do not try to get around it, ask the user instead.",
+        name = config.name
+    );
+    if !config.instructions.trim().is_empty() {
+        text.push_str("\n\nThe user's instructions for you:\n");
+        text.push_str(config.instructions.trim());
+    }
+    // Rule packs the user attached, after the user's own instructions and
+    // fenced off: their text comes from third-party mods. Changing one changes
+    // this text, so the agent starts a new conversation, as for any change here.
+    let packs: Vec<(String, String)> = config
+        .rule_packs
+        .iter()
+        .filter_map(|pack| {
+            let rules = pack.instructions();
+            let rules = rules.trim();
+            (!rules.is_empty()).then(|| (pack.label(), rules.chars().take(MAX_PACK_CHARS).collect()))
+        })
+        .collect();
+    if !packs.is_empty() {
+        text.push_str(&format!("\n\n<{MOD_RULES}>\n{MOD_RULES_INTRO}"));
+        for (label, rules) in &packs {
+            text.push_str(&format!("\n\nRules from {} (a mod):\n{}", defuse(label), defuse(rules)));
+        }
+        text.push_str(&format!("\n</{MOD_RULES}>"));
+    }
+    text
+}
+
+/// A hash of what the model is told when a conversation starts. Claude Code
+/// keeps the system prompt a session started with, even when the session is
+/// resumed with another one, so when this changes the agent starts a new
+/// conversation. The project notes count only as on or off: their text is
+/// read when a conversation starts, so editing CLAUDE.md never ends one.
+pub fn instructions_hash(config: &AgentConfig) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(instructions(config));
+    hash.update(if config.read_notes { "\n\nProject notes: on" } else { "\n\nProject notes: off" });
+    format!("{:x}", hash.finalize())
+}
+
+fn new_instructions_note(name: &str) -> String {
+    format!("{name}'s instructions changed, so it starts a new conversation and does not remember the messages above.")
 }
 
 /// A select option's current value and the values it offers: (value, name, description).
@@ -734,6 +868,84 @@ mod tests {
     }
 
     #[test]
+    fn claude_code_drops_inherited_provider_variables() {
+        let inherited = [
+            "PATH",
+            "HOME",
+            "HTTPS_PROXY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDECODE",
+            // Set by Blixel as well: its own values win, so these stay.
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CONFIG_DIR",
+            "ANTHROPIC_BASE_URL",
+        ];
+        let config = claude_code_program("sk-test", Path::new("/tmp/cfg"), inherited.iter().map(OsString::from));
+        assert_eq!(config.command(), Path::new("env"));
+        let expected: Vec<String> = [
+            "-u",
+            "ANTHROPIC_AUTH_TOKEN",
+            "-u",
+            "ANTHROPIC_BASE_URL",
+            "-u",
+            "CLAUDECODE",
+            "-u",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "-u",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "npx",
+            "-y",
+            ADAPTER,
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(config.arguments(), expected.as_slice());
+        assert_eq!(config.environment()["ANTHROPIC_API_KEY"], "sk-test");
+        assert_eq!(config.environment()["CLAUDE_CONFIG_DIR"], "/tmp/cfg");
+    }
+
+    /// Runs the launch line with `env` printing what the adapter would get,
+    /// in place of npx, from an environment that has a different server and a
+    /// subscription login set.
+    #[cfg(unix)]
+    #[test]
+    fn claude_code_gets_only_blixels_credentials() {
+        let planted = [("ANTHROPIC_BASE_URL", "https://elsewhere.invalid"), ("CLAUDE_CODE_OAUTH_TOKEN", "subscription")];
+        let inherited = std::env::vars_os().map(|(name, _)| name).chain(planted.iter().map(|(name, _)| OsString::from(name)));
+        let config = claude_code_program("sk-test", Path::new("/tmp/cfg"), inherited);
+        let args = config.arguments();
+        let npx = args.iter().position(|a| a == "npx").expect("npx in the launch line");
+        let output = std::process::Command::new(config.command())
+            .args(&args[..npx])
+            .arg("env")
+            .envs(planted)
+            .envs(config.environment())
+            .output()
+            .expect("env runs");
+        assert!(output.status.success());
+        let seen = String::from_utf8_lossy(&output.stdout);
+        let mut provider: Vec<&str> = seen
+            .lines()
+            .filter(|line| PROVIDER_PREFIXES.iter().any(|p| line.starts_with(p)))
+            .map(|line| line.split('=').next().unwrap())
+            .collect();
+        let mut expected = vec![
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "CLAUDE_CONFIG_DIR",
+        ];
+        provider.sort();
+        expected.sort();
+        assert_eq!(provider, expected, "the adapter would see:\n{seen}");
+        assert!(seen.lines().any(|l| l == "ANTHROPIC_API_KEY=sk-test"));
+        assert!(seen.lines().any(|l| l.starts_with("PATH=")), "other variables are kept");
+    }
+
+    #[test]
     fn rule_packs_add_their_instructions() {
         let config = AgentConfig {
             id: "t".into(),
@@ -757,6 +969,7 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, Events::to_sink(|_, _| {}), Arc::new(Broker::default()));
         let prompt = prompt_of(&rt);
@@ -798,6 +1011,7 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, Events::to_sink(|_, _| {}), Arc::new(Broker::default()));
         let prompt = prompt_of(&rt);
@@ -836,6 +1050,7 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, Events::to_sink(|_, _| {}), Arc::new(Broker::default()));
         let options = || {
@@ -939,19 +1154,23 @@ mod tests {
             effort: "low".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
-        let session: Arc<Mutex<Option<String>>> = Arc::default();
-        let start = |resume: Option<String>, rx| {
+        let session: Arc<Mutex<Option<Earlier>>> = Arc::default();
+        let start = |resume: Option<Earlier>, rx| {
             let session = session.clone();
             tokio::spawn(run(
                 rt.clone(),
                 root.clone(),
                 root.join(".claude-config"),
                 Launch::ClaudeCode { api_key: "sk-ant-invalid".into() },
+                Sandbox::new(Sandbox::home(), None, None),
                 hub.clone(),
                 resume,
-                Box::new(move |id| *session.lock().unwrap() = Some(id.to_string())),
+                Box::new(move |id, told| {
+                    *session.lock().unwrap() = Some(Earlier { id: id.to_string(), instructions: Some(told.to_string()) })
+                }),
                 rx,
             ))
         };
@@ -975,15 +1194,19 @@ mod tests {
         let models = wait_for("agent://models", 0, 5).await;
         // Claude Code listed the connector's tools through the gateway, which started it.
         let reached = wait_for("connector://state", 0, 30).await;
-        // A changed instruction rebuilds the session with session/resume.
+        // A changed instruction starts a new conversation (a resumed session keeps the old ones)...
         rt.config.write().unwrap().instructions = "Reply with two words.".into();
         tx.send(Command::Settings).unwrap();
-        let resumed = wait_for("new settings", 0, 120).await;
-        // So does taking the connector away.
+        let renewed = wait_for("starts a new conversation", 0, 120).await;
+        // ...while taking the connector away rebuilds it with session/resume.
         let before = seen.lock().unwrap().len();
         rt.config.write().unwrap().connectors.clear();
         tx.send(Command::Settings).unwrap();
         let dropped = wait_for("new settings", before, 120).await;
+        // A message makes the new session the one to carry on.
+        let before = seen.lock().unwrap().len();
+        tx.send(Command::Prompt { id: "u1b".into(), text: "still there".into() }).unwrap();
+        let used = wait_for("The turn failed", before, 240).await;
         drop(tx);
         let outcome = tokio::time::timeout(Duration::from_secs(60), first).await;
         let first_session = session.lock().unwrap().clone();
@@ -1001,8 +1224,9 @@ mod tests {
             assert!(reported.contains(&format!("\"id\":\"{id}\"")), "the adapter does not offer {id}: {reported}");
         }
         assert!(reached.is_ok(), "Claude Code never reached the connector:\n{log}");
-        assert!(resumed.is_ok(), "the settings change was not applied:\n{log}");
+        assert!(renewed.is_ok(), "the instructions change was not applied:\n{log}");
         assert!(dropped.is_ok(), "the connector change was not applied:\n{log}");
+        assert!(used.is_ok(), "the turn in the new session never finished:\n{log}");
         assert!(outcome.is_ok(), "the session did not end when the channel closed:\n{log}");
         eprintln!("session ended with {:?}", outcome.unwrap().unwrap());
         assert!(first_session.is_some(), "the session id was never handed out");

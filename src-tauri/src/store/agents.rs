@@ -1,6 +1,7 @@
 //! Saved agents: each one's settings as the interface sent them, and the
-//! last session of its program, to carry on its conversation, both under one
-//! keyed check (a changed session id would carry on another conversation).
+//! last session of its program, to carry on its conversation, with a hash of
+//! the instructions that session started with, all under one keyed check (a
+//! changed session id would carry on another conversation).
 //! A row that fails its check was changed outside the app: it loads lowered,
 //! its agent may not run, and it stays that way, whatever later automatic
 //! saves send, until the user reviews it and saves it from the agent's form.
@@ -67,13 +68,18 @@ impl Saved {
     }
 }
 
-/// What the check covers: where the row is, the settings and the session.
-fn parts<'a>(project_id: &'a str, agent_id: &'a str, json: &'a str, session: Option<&'a str>) -> [&'a str; 5] {
-    ["agent", project_id, agent_id, json, session.unwrap_or("")]
+/// What the check covers: where the row is, the settings and the session,
+/// with its instructions' hash when it has one (rows saved before there was
+/// one keep the check they were signed with).
+fn parts<'a>(project_id: &'a str, agent_id: &'a str, json: &'a str, session: &'a Session) -> Vec<&'a str> {
+    let mut parts = vec!["agent", project_id, agent_id, json, session.id.as_deref().unwrap_or("")];
+    parts.extend(session.instructions.as_deref());
+    parts
 }
 
 /// For settings whose row was changed outside the app: every tool's Allow
-/// becomes Ask and every connector Off (as `AgentConfig::lower_untrusted`).
+/// becomes Ask, every connector Off and the network off (as
+/// `AgentConfig::lower_untrusted`).
 pub fn lower_untrusted(agent: &mut Value) {
     if let Some(map) = agent.get_mut("permissions").and_then(Value::as_object_mut) {
         for setting in map.values_mut() {
@@ -87,19 +93,29 @@ pub fn lower_untrusted(agent: &mut Value) {
             *setting = json!("off");
         }
     }
+    if let Some(map) = agent.as_object_mut() {
+        map.insert("network".into(), json!(false));
+    }
+}
+
+/// An agent's saved session and the hash of the instructions it started with.
+#[derive(Clone, Default)]
+struct Session {
+    id: Option<String>,
+    instructions: Option<String>,
 }
 
 struct Row {
     json: String,
     mac: String,
-    session: Option<String>,
+    session: Session,
 }
 
 fn row(conn: &Connection, project_id: &str, agent_id: &str) -> Result<Option<Row>, String> {
     conn.query_row(
-        "SELECT json, mac, session_id FROM agents WHERE project_id = ?1 AND agent_id = ?2",
+        "SELECT json, mac, session_id, session_instructions FROM agents WHERE project_id = ?1 AND agent_id = ?2",
         (project_id, agent_id),
-        |r| Ok(Row { json: r.get(0)?, mac: r.get(1)?, session: r.get(2)? }),
+        |r| Ok(Row { json: r.get(0)?, mac: r.get(1)?, session: Session { id: r.get(2)?, instructions: r.get(3)? } }),
     )
     .optional()
     .map_err(err)
@@ -109,7 +125,7 @@ fn row(conn: &Connection, project_id: &str, agent_id: &str) -> Result<Option<Row
 /// so it stays so even if it is changed back. An unreadable key is an error:
 /// nothing is marked for good because the keychain was locked.
 fn passes(conn: &Connection, project_id: &str, agent_id: &str, row: &Row) -> Result<bool, String> {
-    if mac::check(&parts(project_id, agent_id, &row.json, row.session.as_deref()), &row.mac)? {
+    if mac::check(&parts(project_id, agent_id, &row.json, &row.session), &row.mac)? {
         return Ok(true);
     }
     if row.mac != UNTRUSTED {
@@ -147,17 +163,19 @@ pub fn save(conn: &mut Connection, project_id: &str, agent: &Value, reviewed: bo
     if text.len() > MAX_AGENT_BYTES {
         return Err(format!("This agent's settings are too large to save ({} KB).", text.len() / 1024));
     }
-    let session = existing.and_then(|row| row.session).filter(|_| passed);
+    let session = existing.map(|row| row.session).filter(|_| passed).unwrap_or_default();
     let mac = if trusted {
-        mac::sign(&parts(project_id, agent_id, &text, session.as_deref())).map_err(|e| format!("Cannot save this agent: {e}"))?
+        mac::sign(&parts(project_id, agent_id, &text, &session)).map_err(|e| format!("Cannot save this agent: {e}"))?
     } else {
         UNTRUSTED.to_string()
     };
     tx.execute(
-        "INSERT INTO agents (project_id, agent_id, json, mac, session_id, created, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        "INSERT INTO agents (project_id, agent_id, json, mac, session_id, session_instructions, created, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
          ON CONFLICT (project_id, agent_id) DO UPDATE SET
-             json = excluded.json, mac = excluded.mac, session_id = excluded.session_id, updated = excluded.updated",
-        params![project_id, agent_id, text, mac, session, now()],
+             json = excluded.json, mac = excluded.mac, session_id = excluded.session_id,
+             session_instructions = excluded.session_instructions, updated = excluded.updated",
+        params![project_id, agent_id, text, mac, session.id, session.instructions, now()],
     )
     .map_err(err)?;
     tx.commit().map_err(err)?;
@@ -168,10 +186,15 @@ pub fn save(conn: &mut Connection, project_id: &str, agent: &Value, reviewed: bo
 pub fn load(conn: &Connection, project_id: &str) -> Result<Vec<Saved>, String> {
     projects::get(conn, project_id)?;
     let mut stmt = conn
-        .prepare("SELECT agent_id, json, mac, session_id FROM agents WHERE project_id = ?1 ORDER BY created, rowid")
+        .prepare(
+            "SELECT agent_id, json, mac, session_id, session_instructions FROM agents WHERE project_id = ?1 ORDER BY created, rowid",
+        )
         .map_err(err)?;
     let rows = stmt
-        .query_map([project_id], |r| Ok((r.get::<_, String>(0)?, Row { json: r.get(1)?, mac: r.get(2)?, session: r.get(3)? })))
+        .query_map([project_id], |r| {
+            let session = Session { id: r.get(3)?, instructions: r.get(4)? };
+            Ok((r.get::<_, String>(0)?, Row { json: r.get(1)?, mac: r.get(2)?, session }))
+        })
         .map_err(err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(err)?;
@@ -215,8 +238,9 @@ pub fn remove(conn: &mut Connection, project_id: &str, agent_id: &str) -> Result
 pub enum Resume {
     /// A new conversation: nothing saved to carry on from.
     Fresh,
-    /// Carry on this session.
-    Session(String),
+    /// Carry on this session, which started with the instructions whose
+    /// hash is given (None: saved before the hash was kept).
+    Session { id: String, instructions: Option<String> },
     /// The row fails its check (changed outside the app since it loaded):
     /// the agent may not run until the user reviews it.
     Changed,
@@ -228,25 +252,30 @@ pub fn resume(conn: &Connection, project_id: &str, agent_id: &str) -> Result<Res
     if !passes(conn, project_id, agent_id, &row)? {
         return Ok(Resume::Changed);
     }
-    Ok(row.session.filter(|s| !s.is_empty()).map_or(Resume::Fresh, Resume::Session))
+    Ok(match row.session {
+        Session { id: Some(id), instructions } if !id.is_empty() => Resume::Session { id, instructions },
+        _ => Resume::Fresh,
+    })
 }
 
-/// Remembers the agent's session, signed with the rest of a trusted row; an
-/// untrusted row stays untrusted. An agent not saved yet has nowhere to keep it.
-pub fn set_session(conn: &mut Connection, project_id: &str, agent_id: &str, session_id: &str) -> Result<(), String> {
-    if session_id.is_empty() || session_id.len() > 200 {
+/// Remembers the agent's session and the hash of the instructions it started
+/// with, signed with the rest of a trusted row; an untrusted row stays
+/// untrusted. An agent not saved yet has nowhere to keep it.
+pub fn set_session(conn: &mut Connection, project_id: &str, agent_id: &str, session_id: &str, instructions: &str) -> Result<(), String> {
+    if session_id.is_empty() || session_id.len() > 200 || instructions.len() > 200 {
         return Err("unexpected session id".into());
     }
     let tx = conn.transaction().map_err(err)?;
     let Some(row) = row(&tx, project_id, agent_id)? else { return Ok(()) };
+    let session = Session { id: Some(session_id.to_string()), instructions: Some(instructions.to_string()) };
     let mac = if passes(&tx, project_id, agent_id, &row)? {
-        mac::sign(&parts(project_id, agent_id, &row.json, Some(session_id)))?
+        mac::sign(&parts(project_id, agent_id, &row.json, &session))?
     } else {
         UNTRUSTED.to_string()
     };
     tx.execute(
-        "UPDATE agents SET session_id = ?3, mac = ?4 WHERE project_id = ?1 AND agent_id = ?2",
-        (project_id, agent_id, session_id, mac),
+        "UPDATE agents SET session_id = ?3, session_instructions = ?4, mac = ?5 WHERE project_id = ?1 AND agent_id = ?2",
+        (project_id, agent_id, session_id, instructions, mac),
     )
     .map_err(err)?;
     tx.commit().map_err(err)
@@ -285,6 +314,33 @@ mod tests {
         })
     }
 
+    fn session(id: &str, instructions: Option<&str>) -> Resume {
+        Resume::Session { id: id.into(), instructions: instructions.map(str::to_owned) }
+    }
+
+    #[test]
+    fn a_session_keeps_its_instructions_hash_under_the_check() {
+        let db = db_with_projects();
+        let mut conn = db.conn.lock().unwrap();
+        save(&mut conn, "p1", &agent("a1", "Ada"), false).unwrap();
+
+        // A row signed before the hash was kept, as an older app left it: still trusted, with no hash.
+        let json = json_of(&conn, "a1");
+        let old = mac::sign(&["agent", "p1", "a1", &json, "s-old"]).unwrap();
+        conn.execute("UPDATE agents SET session_id = 's-old', mac = ?1 WHERE agent_id = 'a1'", [&old]).unwrap();
+        assert!(load(&conn, "p1").unwrap()[0].trusted);
+        assert_eq!(resume(&conn, "p1", "a1").unwrap(), session("s-old", None));
+
+        // A new session keeps its hash, and saving the settings keeps both.
+        set_session(&mut conn, "p1", "a1", "s-1", "h-1").unwrap();
+        save(&mut conn, "p1", &agent("a1", "Ada again"), false).unwrap();
+        assert_eq!(resume(&conn, "p1", "a1").unwrap(), session("s-1", Some("h-1")));
+
+        // A hash changed outside the app fails the check like a changed session id.
+        conn.execute("UPDATE agents SET session_instructions = 'h-other' WHERE agent_id = 'a1'", []).unwrap();
+        assert_eq!(resume(&conn, "p1", "a1").unwrap(), Resume::Changed);
+    }
+
     fn db_with_projects() -> Db {
         let db = Db::memory();
         let conn = db.conn.lock().unwrap();
@@ -319,16 +375,16 @@ mod tests {
 
         // Saving again keeps its place and its session, still trusted.
         assert_eq!(resume(&conn, "p1", "a1").unwrap(), Resume::Fresh);
-        set_session(&mut conn, "p1", "a1", "s-1").unwrap();
+        set_session(&mut conn, "p1", "a1", "s-1", "h-1").unwrap();
         let again = save(&mut conn, "p1", &agent("a1", "Ada renamed"), false).unwrap();
         assert!(again.trusted);
         let saved = load(&conn, "p1").unwrap();
         assert!(saved[0].trusted);
         assert_eq!(saved[0].agent["name"], "Ada renamed");
-        assert_eq!(resume(&conn, "p1", "a1").unwrap(), Resume::Session("s-1".into()));
+        assert_eq!(resume(&conn, "p1", "a1").unwrap(), session("s-1", Some("h-1")));
         assert_eq!(resume(&conn, "p2", "a1").unwrap(), Resume::Fresh, "projects are separate");
         assert_eq!(resume(&conn, "p1", "nobody").unwrap(), Resume::Fresh);
-        set_session(&mut conn, "p1", "nobody", "s-2").unwrap();
+        set_session(&mut conn, "p1", "nobody", "s-2", "h-2").unwrap();
         assert_eq!(load(&conn, "p2").unwrap()[0].agent["name"], "Ada elsewhere");
 
         // Placeholders are saved, but never reach the core.
@@ -373,10 +429,13 @@ mod tests {
         assert_eq!(a.to_json()["trust"], "changed-outside");
         assert_eq!(a.agent["permissions"], json!({ "read": "ask", "edit": "ask", "run": "ask", "commit": "off", "push": "off" }));
         assert_eq!(a.agent["connectors"], json!({ "c1": "off", "c2": "off" }), "every connector is off");
+        assert_eq!(a.agent["network"], false, "and the network");
         let config = a.config().unwrap();
         assert_eq!(config.permissions.run, crate::agents::settings::Setting::Ask);
+        assert!(!config.network);
         assert_eq!(config.connectors["c1"], crate::agents::settings::Setting::Off);
         assert!(b.trusted, "the other agent is untouched");
+        assert!(b.config().unwrap().network, "saved before the setting existed: on");
         assert_eq!(b.agent["permissions"]["edit"], "allow");
 
         // Marked: changing it back does not trust it again.
@@ -396,7 +455,7 @@ mod tests {
         assert!(!saved[0].trusted);
         assert_eq!((saved[0].agent["model"].as_str(), saved[0].agent["permissions"]["read"].as_str()), (Some("opus"), Some("ask")));
         // Nor does a session arriving meanwhile.
-        set_session(&mut conn, "p1", "a1", "s-9").unwrap();
+        set_session(&mut conn, "p1", "a1", "s-9", "h-9").unwrap();
         assert!(!load(&conn, "p1").unwrap()[0].trusted);
 
         // Only the user's reviewed save trusts it again, with a new conversation.
@@ -418,8 +477,8 @@ mod tests {
         let mut conn = db.conn.lock().unwrap();
         save(&mut conn, "p1", &agent("a1", "Ada"), false).unwrap();
         save(&mut conn, "p1", &agent("b2", "Bo"), false).unwrap();
-        set_session(&mut conn, "p1", "a1", "s-1").unwrap();
-        assert_eq!(resume(&conn, "p1", "a1").unwrap(), Resume::Session("s-1".into()));
+        set_session(&mut conn, "p1", "a1", "s-1", "h-1").unwrap();
+        assert_eq!(resume(&conn, "p1", "a1").unwrap(), session("s-1", Some("h-1")));
 
         // Another conversation's id, put in by something outside the app.
         conn.execute("UPDATE agents SET session_id = 'someone-else' WHERE agent_id = 'a1'", []).unwrap();

@@ -6,6 +6,13 @@
 .limit-today[data-level="at"], .limit-today[data-level="bad"] { color: var(--danger-fg); }
 .hint-line.limit-hint { margin-bottom: 0; line-height: 18px; }
 
+/* The network switch under the tool rows, its hint lined up with its label
+   (past the 44 px switch and its 12 px gap). Settings, New agents uses it too. */
+.net-row { padding: 12px 0 4px; border-top: 1px solid var(--line); }
+.net-row > .hint-line { margin: 4px 0 0 56px; line-height: 18px; }
+/* A note under a tool row (Push, for real agents), as close set as the other hints. */
+.area-row > .label { display: block; line-height: 18px; }
+
 /* The stand-in's instructions, folded until asked for. */
 .standin-fold {
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;

@@ -77,6 +77,7 @@ export async function syncAgent(agent: Agent, reviewed = false): Promise<SavedAg
       readNotes: agent.readNotes,
       permissions: agent.permissions,
       editPaths: agent.editPaths,
+      network: agent.network,
       // The copies attached to the agent, not what the mods hold now: a mod's
       // update reaches the agent only once the user reviews it.
       rulePacks: agent.rulePacks.map(({ label, instructions, editArea, protect }) => ({ label, instructions, editArea, protect })),

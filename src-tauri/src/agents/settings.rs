@@ -98,6 +98,14 @@ pub struct AgentConfig {
     /// ("" for no limit); read with `usage::parse_limit`.
     #[serde(default)]
     pub daily_limit: String,
+    /// Whether its commands may use the network. They always run in the
+    /// sandbox (sandbox.rs); agents saved before this setting have it on.
+    #[serde(default = "on")]
+    pub network: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 /// The program value for the stand-in agent (`crate::stand_in`).
@@ -199,6 +207,7 @@ impl AgentConfig {
         for setting in self.connectors.values_mut() {
             *setting = Setting::Off;
         }
+        self.network = false;
     }
 
     /// Applies the agent's own area and every attached rule pack. Packs only
@@ -246,6 +255,7 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         }
     }
 
