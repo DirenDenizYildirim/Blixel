@@ -8,6 +8,8 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::State;
 
+use crate::safe_fs;
+
 /// Files larger than this are not opened in the editor.
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 /// Stop listing after this many entries so a huge folder cannot hang the app.
@@ -131,8 +133,10 @@ fn relative<'a>(root: &Path, path: &'a str) -> Result<&'a Path, String> {
 /// would follow it, even a dangling one, wherever it points), and a folder
 /// link that leads out of `root` or nowhere. `root` must be canonical.
 ///
-/// It checks the disk as it is now: a command run in between could still
-/// swap a folder for a link, which only a sandbox for commands would stop.
+/// It checks the disk as it is now, so a refusal comes with a clear reason
+/// before anyone is asked. A command run in between may still swap a folder
+/// for a link, so the writes themselves open the path again with `safe_fs`,
+/// which refuses any link at the moment of opening.
 pub fn resolve_under(root: &Path, path: &str) -> Result<(PathBuf, String), String> {
     let full = root.join(relative(root, path)?);
     if fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -227,13 +231,18 @@ pub fn read_file(path: String, ws: State<Workspace>) -> Result<String, String> {
 /// answer is false: an agent or a command wrote it, and saving would undo that.
 #[tauri::command]
 pub fn write_file(path: String, content: String, expected: Option<String>, ws: State<Workspace>) -> Result<bool, String> {
-    write_checked(&ws.resolve(&path)?, &content, expected.as_deref())
+    let full = ws.resolve(&path)?;
+    write_checked(&ws.root()?, &full, &content, expected.as_deref())
 }
 
-fn write_checked(full: &Path, content: &str, expected: Option<&str>) -> Result<bool, String> {
+/// `full` is where `resolve_under` found the save lands. Both the check and
+/// the write open it again beneath `root` without following links
+/// (`safe_fs`), so a folder swapped for a link since is refused, not followed.
+fn write_checked(root: &Path, full: &Path, content: &str, expected: Option<&str>) -> Result<bool, String> {
+    let rel = full.strip_prefix(root).map_err(|_| format!("path is outside the project: {}", full.display()))?;
     let _held = FILE_LOCK.lock().map_err(|_| "file lock poisoned")?;
     if let Some(expected) = expected {
-        let current = match std::fs::read_to_string(full) {
+        let current = match safe_fs::read_to_string(root, rel) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e.to_string()),
@@ -242,7 +251,7 @@ fn write_checked(full: &Path, content: &str, expected: Option<&str>) -> Result<b
             return Ok(false);
         }
     }
-    std::fs::write(full, content).map_err(|e| e.to_string())?;
+    safe_fs::write(root, rel, content.as_bytes()).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -329,7 +338,7 @@ mod tests {
             assert!(resolve_under(&root, path).is_err(), "{path}");
             assert!(ws.resolve(path).is_err(), "{path}");
         }
-        assert!(ws.resolve("dangling.txt").and_then(|full| write_checked(&full, "x", None)).is_err());
+        assert!(ws.resolve("dangling.txt").and_then(|full| write_checked(&root, &full, "x", None)).is_err());
         assert!(!out.join("not-yet.txt").exists(), "nothing was written outside");
         assert_eq!(std::fs::read_to_string(out.join("secret.txt")).unwrap(), "secret");
         let _ = std::fs::remove_dir_all(out);
@@ -387,13 +396,39 @@ mod tests {
     fn a_save_never_overwrites_a_change_it_has_not_seen() {
         let (ws, root) = workspace_in("save");
         let file = ws.resolve("src/a.ts").unwrap();
-        assert_eq!(write_checked(&file, "one", Some("")), Ok(true), "a new file matches empty");
+        assert_eq!(write_checked(&root, &file, "one", Some("")), Ok(true), "a new file matches empty");
         std::fs::write(root.join("src/a.ts"), "agent").unwrap();
-        assert_eq!(write_checked(&file, "mine", Some("one")), Ok(false));
+        assert_eq!(write_checked(&root, &file, "mine", Some("one")), Ok(false));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "agent");
-        assert_eq!(write_checked(&file, "mine", Some("agent")), Ok(true));
-        assert_eq!(write_checked(&file, "forced", None), Ok(true));
+        assert_eq!(write_checked(&root, &file, "mine", Some("agent")), Ok(true));
+        assert_eq!(write_checked(&root, &file, "forced", None), Ok(true));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "forced");
+    }
+
+    /// The path is checked, then a command swaps its folder for a link out of
+    /// the project (`mv src src.real; ln -s <outside> src`), then the save
+    /// runs: it is refused, and nothing outside is touched.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_swapped_for_a_link_after_the_check_is_refused() {
+        let (ws, root) = workspace_in("swap");
+        let out = outside(&root);
+        std::fs::write(root.join("src/a.ts"), "a").unwrap();
+        let existing = ws.resolve("src/a.ts").unwrap();
+        let new = ws.resolve("src/secret.txt").unwrap();
+
+        std::fs::rename(root.join("src"), root.join("src.real")).unwrap();
+        std::os::unix::fs::symlink(&out, root.join("src")).unwrap();
+        for full in [&existing, &new] {
+            for expected in [None, Some("a"), Some("secret")] {
+                let refused = write_checked(&root, full, "changed", expected).unwrap_err();
+                assert!(refused.contains("symbolic link"), "{refused}");
+            }
+        }
+        assert_eq!(std::fs::read_to_string(out.join("secret.txt")).unwrap(), "secret");
+        assert!(!out.join("a.ts").exists(), "nothing was written outside");
+        assert_eq!(std::fs::read_to_string(root.join("src.real/a.ts")).unwrap(), "a");
+        let _ = std::fs::remove_dir_all(out);
     }
 
     #[test]

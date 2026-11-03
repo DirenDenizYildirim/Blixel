@@ -6,6 +6,7 @@
 mod end_to_end;
 pub mod permissions;
 pub mod runtime;
+pub mod sandbox;
 pub mod session;
 pub mod settings;
 pub mod tools;
@@ -27,11 +28,9 @@ use crate::workspace::Workspace;
 
 use permissions::{Answer, Broker};
 use runtime::AgentRuntime;
-use session::{Command, Launch};
+use sandbox::Sandbox;
+use session::{Command, Launch, OnSession};
 use settings::{AgentConfig, STAND_IN};
-
-/// Hears an agent's session id once its program reports it.
-type OnSession = Box<dyn Fn(&str) + Send + Sync>;
 
 struct Entry {
     rt: Arc<AgentRuntime>,
@@ -199,9 +198,11 @@ fn config_dir(app: &AppHandle, project: Option<&str>, agent_id: &str) -> Result<
 /// Creates an agent or updates its settings without saving them. Edit, Run,
 /// Commit, Push, the edit area and the areas and protected paths of its rule
 /// packs apply to the running agent at once, since Blixel's own tools check
-/// them on every call. The rest (model, effort, instructions including the
-/// rule packs', project notes, Read) is applied to its session between turns,
-/// keeping the conversation. Kept until the interface uses `agent_save`.
+/// them on every call. The rest applies between turns: model, effort, Read
+/// and connectors keep the conversation; a change to what the model is told
+/// (name, instructions, rule packs, project notes on or off) starts a new
+/// one, since Claude Code would keep the old instructions in a resumed
+/// session. Kept until the interface uses `agent_save`.
 #[tauri::command]
 pub fn upsert_agent(config: AgentConfig, agents: State<Agents>) {
     agents.put(config, None);
@@ -236,12 +237,15 @@ pub fn send_prompt(
         let root = workspace.current_root().ok_or("Open a project folder first: real agents work on files on disk.")?;
         let launch = launch_for(&entry.rt.config().program)?;
         let dir = config_dir(&app, project.as_deref(), &agent_id)?;
+        // Its commands' cache layers sit beside its program's folder, in Blixel's data.
+        let app_data = app.path().app_data_dir().ok();
+        let sandbox = Sandbox::new(Sandbox::home(), app_data, dir.parent().map(|agent| agent.join("sandbox")));
         // Carry on from the agent's last session, and keep each new one for next time.
-        let (resume, on_session): (Option<String>, OnSession) = match project {
+        let (resume, on_session): (Option<session::Earlier>, OnSession) = match project {
             Some(project) => {
                 let resume = app.state::<Db>().lock().and_then(|conn| store::agents::resume(&conn, &project, &agent_id));
                 let resume = match resume {
-                    Ok(store::agents::Resume::Session(id)) => Some(id),
+                    Ok(store::agents::Resume::Session { id, instructions }) => Some(session::Earlier { id, instructions }),
                     // Its row changed since the project opened: it waits for the user's review.
                     Ok(store::agents::Resume::Changed) => {
                         entry.rt.config.write().expect("config lock").lower_untrusted();
@@ -255,18 +259,18 @@ pub fn send_prompt(
                     }
                 };
                 let (app, agent_id) = (app.clone(), agent_id.clone());
-                let keep = move |session_id: &str| {
+                let keep = move |session_id: &str, instructions: &str| {
                     let kept = app
                         .state::<Db>()
                         .lock()
-                        .and_then(|mut conn| store::agents::set_session(&mut conn, &project, &agent_id, session_id));
+                        .and_then(|mut conn| store::agents::set_session(&mut conn, &project, &agent_id, session_id, instructions));
                     if let Err(e) = kept {
                         eprintln!("could not keep the session of {agent_id}: {e}");
                     }
                 };
                 (resume, Box::new(keep))
             }
-            None => (None, Box::new(|_: &str| {})),
+            None => (None, Box::new(|_: &str, _: &str| {})),
         };
         let (tx, rx) = mpsc::unbounded_channel();
         let rt = entry.rt.clone();
@@ -282,7 +286,7 @@ pub fn send_prompt(
         // The session ends when the agent exits or when every sender is dropped
         // (stop_all), so the task holds only the receiver.
         tauri::async_runtime::spawn(async move {
-            let outcome = session::run(rt.clone(), root, dir, launch, hub, resume, on_session, rx).await;
+            let outcome = session::run(rt.clone(), root, dir, launch, sandbox, hub, resume, on_session, rx).await;
             if let Err(e) = outcome {
                 rt.events.note(&rt.id, &format!("{} stopped: {e}", rt.name()));
             }
@@ -424,7 +428,8 @@ pub async fn agent_remove(project_id: String, agent_id: String, app: AppHandle) 
         agents.remove(&agent_id);
     }
     store::blocking(&app, move |db| store::agents::remove(&mut *db.lock()?, &project_id, &agent_id)).await?;
-    if let Err(e) = std::fs::remove_dir_all(&dir) {
+    // Its commands' cache layers are in there too.
+    if let Err(e) = sandbox::remove_all(&dir) {
         if e.kind() != std::io::ErrorKind::NotFound {
             eprintln!("could not remove {}: {e}", dir.display());
         }

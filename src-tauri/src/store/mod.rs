@@ -403,7 +403,8 @@ pub async fn project_remove(id: String, app: AppHandle) -> Result<(), String> {
         close(&app);
     }
     blocking(&app, move |db| projects::remove(&mut *db.lock()?, &id)).await?;
-    if let Err(e) = std::fs::remove_dir_all(&dir) {
+    // Its agents' command cache layers are in there too.
+    if let Err(e) = crate::agents::sandbox::remove_all(&dir) {
         if e.kind() != std::io::ErrorKind::NotFound {
             eprintln!("could not remove {}: {e}", dir.display());
         }

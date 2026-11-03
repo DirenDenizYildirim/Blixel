@@ -43,6 +43,12 @@ let queue: Promise<void> = Promise.resolve();
 
 const agentJson = (agent: Agent) => JSON.stringify({ ...agent, status: "idle" });
 
+/** An agent as the core kept it, with settings added since it was saved at their defaults. */
+export const agentFromSaved = (agent: Agent): Agent => ({
+  ...agent,
+  network: typeof agent.network === "boolean" ? agent.network : true,
+});
+
 let lastProblem = 0;
 function report(e: unknown) {
   // One notice now and then, not one per failed write.
@@ -487,7 +493,7 @@ export async function loadProject(project: Project): Promise<ProjectData> {
 
   const saved = await attempt("its agents", () => agentsList(project.id), []);
   // One at today's spending limit says so from the start (the core marks it).
-  const agents: Agent[] = saved.map((s) => ({ ...s.agent, status: s.agent.status === "limited" ? "limited" : "idle" }));
+  const agents: Agent[] = saved.map((s) => ({ ...agentFromSaved(s.agent), status: s.agent.status === "limited" ? "limited" : "idle" }));
   const agentTrust: ProjectData["agentTrust"] = {};
   for (const s of saved) if (s.trust === "changed-outside") agentTrust[s.agent.id] = s.trust;
 

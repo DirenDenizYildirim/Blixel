@@ -10,6 +10,7 @@ const base: Omit<Agent, "id" | "name" | "role" | "program" | "runsOn" | "model" 
   readNotes: true,
   permissions: { read: "allow", edit: "allow", run: "allow", commit: "ask", push: "ask" },
   editPaths: "",
+  network: true,
   rulePacks: [],
   connectors: {},
   canMessage: true,

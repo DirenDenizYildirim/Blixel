@@ -14,6 +14,7 @@ run on an opened folder through Blixel's own tools.
   with a dummy key (network, about 250 MB on first run) and checks the fallback
   model ids against it. Plain `cargo test` also builds the app binary, which
   the end-to-end tests start in its stand-in agent mode (no key, no network).
+  The tests need bubblewrap (`bwrap`), since every agent command runs in it.
 - In development builds the agent form offers the **stand-in** program: a
   test agent that follows plain instructions instead of a model (see
   `src/components/StandInHelp.tsx`), so the real agent path can be tried
@@ -46,13 +47,15 @@ run on an opened folder through Blixel's own tools.
   Author docs: `docs/mods.md`, `docs/host-api.d.ts`; examples in
   `examples/mods/` (`test.escape` is the sandbox regression check).
 - `src-tauri/src/workspace.rs`: file access for an opened folder, confined to
-  that folder.
+  that folder; `safe_fs.rs` opens files beneath it without following links.
 - `src-tauri/src/agents/`: real agents. `session.rs` runs the Claude adapter
   over ACP with its built-in edit and shell tools off; `tools.rs` is Blixel's
   MCP tool server (edit, write, bash) that enforces each agent's settings;
   `permissions.rs` holds questions for the user; `usage.rs` counts spending
-  and enforces each agent's daily limit; `end_to_end.rs` tests the whole
-  path with the stand-in. `src/model/real-agent.ts` is the interface side.
+  and enforces each agent's daily limit; `sandbox.rs` runs every agent
+  command in bubblewrap (what it sees, its cache layers, its network);
+  `end_to_end.rs` tests the whole path with the stand-in.
+  `src/model/real-agent.ts` is the interface side.
 - `src-tauri/src/stand_in.rs`: the stand-in agent (the app binary run with
   `--stand-in-agent`, debug builds only).
 - `src-tauri/src/secrets.rs`: API keys and other secrets in the system keychain.

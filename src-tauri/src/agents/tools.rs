@@ -24,9 +24,11 @@ use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::events::{new_id, Activity, Edit};
+use crate::safe_fs;
 use crate::workspace::{resolve_under, FILE_LOCK, MAX_FILE_BYTES};
 
 use super::runtime::{AgentRuntime, Gate};
+use super::sandbox::{Prepared, Sandbox};
 use super::settings::{EditCheck, Setting, Tool};
 
 /// The name agents see this server under; tools become `mcp__blixel__<tool>`.
@@ -42,6 +44,8 @@ const MAX_OUTPUT_CHARS: usize = 30_000;
 pub struct BlixelTools {
     rt: Arc<AgentRuntime>,
     root: PathBuf,
+    /// Where every command runs.
+    sandbox: Arc<Sandbox>,
     /// The tool server's stop: cancelled when the session ends (Stop, a
     /// project switch, the agent exiting), and commands still running stop with it.
     stop: CancellationToken,
@@ -101,8 +105,8 @@ fn done(text: impl Into<String>) -> Result<CallToolResult, ErrorData> {
 
 #[tool_router]
 impl BlixelTools {
-    pub fn new(rt: Arc<AgentRuntime>, root: PathBuf) -> Self {
-        Self { rt, root, stop: CancellationToken::new(), tool_router: Self::tool_router() }
+    pub fn new(rt: Arc<AgentRuntime>, root: PathBuf, sandbox: Arc<Sandbox>) -> Self {
+        Self { rt, root, sandbox, stop: CancellationToken::new(), tool_router: Self::tool_router() }
     }
 
     #[tool(
@@ -114,14 +118,16 @@ impl BlixelTools {
         if a.old_string == a.new_string {
             return fail("No changes to make: old_string and new_string are exactly the same.");
         }
-        let (full, rel) = match self.allow_edit(&a.file_path).await {
+        let (inside, rel) = match self.allow_edit(&a.file_path).await {
             Ok(v) => v,
             Err(message) => return fail(message),
         };
         // Read and write under the file lock, so a save by the user cannot land in between.
+        // Both open the file anew without following links: while the user was asked,
+        // a command may have swapped a folder on the way for one.
         let before = {
             let _held = FILE_LOCK.lock().expect("file lock");
-            let before = match std::fs::read_to_string(&full) {
+            let before = match safe_fs::read_to_string(&self.root, &inside) {
                 Ok(text) => text,
                 Err(_) if a.old_string.is_empty() => String::new(),
                 Err(e) => return fail(format!("Cannot read {rel}: {e}")),
@@ -149,7 +155,7 @@ impl BlixelTools {
                     before.replacen(&a.old_string, &a.new_string, 1)
                 }
             };
-            if let Err(e) = write_file(&full, &after) {
+            if let Err(e) = write_file(&self.root, &inside, &after) {
                 return fail(format!("Cannot write {rel}: {e}"));
             }
             before
@@ -165,15 +171,19 @@ impl BlixelTools {
         meta = always_load()
     )]
     async fn write(&self, Parameters(a): Parameters<WriteArgs>) -> Result<CallToolResult, ErrorData> {
-        let (full, rel) = match self.allow_edit(&a.file_path).await {
+        let (inside, rel) = match self.allow_edit(&a.file_path).await {
             Ok(v) => v,
             Err(message) => return fail(message),
         };
         let (existed, before) = {
             let _held = FILE_LOCK.lock().expect("file lock");
-            let existed = full.exists();
-            let before = if existed { std::fs::read_to_string(&full).unwrap_or_default() } else { String::new() };
-            if let Err(e) = write_file(&full, &a.content) {
+            let (existed, before) = match safe_fs::read_to_string(&self.root, &inside) {
+                Ok(text) => (true, text),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (false, String::new()),
+                // There but not readable as text: replaced all the same, if the write may open it.
+                Err(_) => (true, String::new()),
+            };
+            if let Err(e) = write_file(&self.root, &inside, &a.content) {
                 return fail(format!("Cannot write {rel}: {e}"));
             }
             (existed, before)
@@ -192,7 +202,9 @@ impl BlixelTools {
     #[tool(
         description = "Runs a shell command in the project folder with bash and returns its output and exit \
             code. Each call starts a fresh shell, so cd does not carry over. The command cannot read input. \
-            The user watches the output live in this agent's shell.",
+            It runs in a sandbox: it can change files only inside the project folder (not git's folder, so \
+            it cannot commit, nor the files that instruct agents), sees only the tool folders of the user's \
+            home folder, and may have no network. The user watches the output live in this agent's shell.",
         meta = always_load()
     )]
     async fn bash(&self, Parameters(a): Parameters<BashArgs>, ct: CancellationToken) -> Result<CallToolResult, ErrorData> {
@@ -205,7 +217,26 @@ impl BlixelTools {
             return fail("Background commands are not available in Blixel yet. Run the command in the foreground with a timeout.");
         }
         let name = self.rt.name();
+        // Commands run only in the sandbox: without it, none run, and nobody is asked.
+        let layers = match self.sandbox.ready(&self.root).await {
+            Ok(layers) => layers,
+            Err(reason) => {
+                self.log("RUN", &a.command, "no sandbox", false, true);
+                if self.sandbox.first_refusal() {
+                    self.rt.events.note(&self.rt.id, &format!("{name} cannot run commands: {reason}"));
+                }
+                return fail(format!("Commands cannot run here: {reason} Do not try to run it another way; tell the user."));
+            }
+        };
         let tools = command_tools(&a.command);
+        // git's folder is read-only in the sandbox: asking about a commit or push that cannot happen helps nobody.
+        if tools.iter().any(|t| matches!(t, Tool::Commit | Tool::Push)) {
+            self.log("RUN", &a.command, "git is read-only", false, true);
+            return fail(
+                "Commits and pushes cannot be made from commands yet: in the sandbox git's folder is read-only. \
+                 Leave committing to the user, and say what is ready to commit.",
+            );
+        }
         let title = format!("{name} is asking to run a command");
         match self.rt.gate(&tools, &title, &a.command).await {
             Gate::Allowed => {}
@@ -227,15 +258,39 @@ impl BlixelTools {
             self.log("RUN", &a.command, "stopped", false, false);
             return fail("Stopped.");
         }
+        // One command at a time (they share the agent's cache layers); a stop ends the wait.
+        let _turn = tokio::select! {
+            turn = self.sandbox.turn() => turn,
+            _ = any_cancelled(&stop) => {
+                self.log("RUN", &a.command, "stopped", false, false);
+                return fail("Stopped.");
+            }
+        };
+        let network = self.rt.config.read().expect("config lock").network;
         let timeout = a.timeout.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
         let entry = self.log("RUN", &a.command, "running", true, false);
         let shown = a.description.as_deref().map(|d| format!("{} ({d})", a.command)).unwrap_or_else(|| a.command.clone());
         self.rt.events.shell(&self.rt.id, Some(&a.command), &format!("\x1b[90m$ {shown}\x1b[0m\r\n"));
 
-        let outcome = run_command(&self.root, &a.command, Duration::from_millis(timeout), &stop, |chunk| {
+        let mut prepared = command_for(&self.sandbox, &self.root, &a.command, network, layers);
+        let outcome = run_command(&mut prepared.command, Duration::from_millis(timeout), &stop, |chunk| {
             self.rt.events.shell(&self.rt.id, None, &to_terminal(chunk));
         })
         .await;
+        // What it created at protected names was moved aside: the agent and the user hear where.
+        let moved = self.sandbox.after(&self.root, &mut prepared).await;
+        let moved_note = (!moved.is_empty()).then(|| {
+            let list: Vec<String> = moved.iter().map(|(name, kept)| format!("{name} ({kept})")).collect();
+            format!(
+                "The command created files that instruct agents or git's folders, which change only through the edit \
+                 tool with the user's OK, so Blixel moved them aside: {}. They may hold what the command wrote: \
+                 do not use them without checking.",
+                list.join(", ")
+            )
+        });
+        if let Some(note) = &moved_note {
+            self.rt.events.note(&self.rt.id, &format!("{name}'s command: {note}"));
+        }
 
         let (result, text) = match outcome {
             Ok(Ran { stopped: true, .. }) => {
@@ -257,15 +312,22 @@ impl BlixelTools {
         };
         self.update_log(&entry, "RUN", &a.command, &result, false);
         self.rt.events.files_changed();
-        done(if text.trim().is_empty() { "(no output)".to_string() } else { text })
+        let text = if text.trim().is_empty() { "(no output)".to_string() } else { text };
+        done(match moved_note {
+            Some(note) => format!("{text}\n\n{note}"),
+            None => text,
+        })
     }
 }
 
 impl BlixelTools {
     /// Resolves the path and applies the areas (the agent's own and its rule
-    /// packs'), the protected paths and the Edit setting.
+    /// packs'), the protected paths and the Edit setting. Returns where the
+    /// edit lands relative to the root: as a path to open beneath it
+    /// (`safe_fs`), and as `/`-separated text for the checks and the log.
     async fn allow_edit(&self, path: &str) -> Result<(PathBuf, String), String> {
         let (full, rel) = resolve_under(&self.root, path)?;
+        let inside = full.strip_prefix(&self.root).map_err(|_| format!("path is outside the project: {path}"))?.to_path_buf();
         let name = self.rt.name();
         let (check, edit) = {
             let config = self.rt.config.read().expect("config lock");
@@ -296,7 +358,7 @@ impl BlixelTools {
             None => self.rt.gate(&[Tool::Edit], &format!("{name} is asking to edit a file"), &rel).await,
         };
         match gate {
-            Gate::Allowed => Ok((full, rel)),
+            Gate::Allowed => Ok((inside, rel)),
             Gate::Off => {
                 self.log("EDIT", &rel, "not allowed", false, true);
                 Err(format!("{name} is not allowed to edit files in this workspace."))
@@ -492,11 +554,12 @@ mod peer {
     }
 }
 
-fn write_file(full: &Path, content: &str) -> std::io::Result<()> {
-    if let Some(dir) = full.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(full, content)
+/// Writes the file at `inside` (relative to `root`), making its missing
+/// folders first. Each folder and the file are opened beneath `root` as the
+/// write happens, refusing any link on the way (`safe_fs`).
+fn write_file(root: &Path, inside: &Path, content: &str) -> std::io::Result<()> {
+    safe_fs::create_parents(root, inside)?;
+    safe_fs::write(root, inside, content.as_bytes())
 }
 
 /// Which settings a command needs. Every command needs Run; committing and
@@ -589,24 +652,16 @@ impl Kept {
 /// Shell output reaches the interface at most this often, in batches.
 const SHELL_BATCH: Duration = Duration::from_millis(50);
 
-/// Variables for what Blixel itself holds, which commands do not inherit:
-/// Anthropic credentials, and the session bus, the way to the keychain where
-/// Blixel keeps API keys and connector secrets. A speed bump, not a
-/// guarantee: a command runs as the user and can still find the bus at its
-/// usual path, or reach the keychain some other way. Keeping secrets from an
-/// agent with Run needs a sandbox for its commands (future work).
-const HELD_VARS: [&str; 4] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "DBUS_SESSION_BUS_ADDRESS"];
-
-/// `bash -c command` in `cwd`, with no input and in a process group of its own.
-fn command_for(cwd: &Path, command: &str) -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg("-c").arg(command).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    for name in HELD_VARS {
-        cmd.env_remove(name);
-    }
+/// `bash -c command` in the agent's sandbox, in `cwd`, with no input and in
+/// a process group of its own. What Blixel holds (keys, the session's
+/// sockets) never reaches it: the sandbox passes on only harmless variables.
+fn command_for(sandbox: &Sandbox, cwd: &Path, command: &str, network: bool, layers: bool) -> Prepared {
+    let mut prepared = sandbox.command(cwd, command, network, layers);
+    let cmd = &mut prepared.command;
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
-    cmd
+    prepared
 }
 
 /// A command's process group, killed when this is dropped unless disarmed:
@@ -648,13 +703,12 @@ async fn any_cancelled(tokens: &[CancellationToken]) {
 /// `on_output` in batches, until it ends, times out or any `stop` token is
 /// cancelled. Timing out or stopping kills its whole process group.
 async fn run_command(
-    cwd: &Path,
-    command: &str,
+    command: &mut tokio::process::Command,
     timeout: Duration,
     stop: &[CancellationToken],
     mut on_output: impl FnMut(&str),
 ) -> std::io::Result<Ran> {
-    let mut child = command_for(cwd, command).spawn()?;
+    let mut child = command.spawn()?;
     let mut group = Group(child.id());
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
@@ -857,10 +911,11 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
         let cancel = CancellationToken::new();
-        let addr = serve(BlixelTools::new(rt, root.clone()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
+        let addr = serve(BlixelTools::new(rt, root.clone(), sandbox()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
         let url = format!("http://{addr}/mcp");
 
         let wrong = StreamableHttpClientTransport::from_config(
@@ -953,9 +1008,10 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, Events::to_sink(|_, _| {}), Arc::new(Broker::default()));
-        let tools = BlixelTools::new(rt.clone(), root);
+        let tools = BlixelTools::new(rt.clone(), root, sandbox());
         for path in ["db/schema.sql", "CLAUDE.md", "src/a.ts"] {
             // Asking would wait for an answer that never comes.
             let outcome = tokio::time::timeout(Duration::from_secs(2), tools.allow_edit(path)).await;
@@ -965,34 +1021,131 @@ mod tests {
         assert_eq!(rt.broker.waiting_for("t"), 0);
     }
 
+    /// The path is checked before the user is asked. While they decide, a
+    /// command swaps a folder for a link out of the project (`mv docs
+    /// docs.real; ln -s <outside> docs`); the change they then allow is
+    /// refused, and nothing outside is touched.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_link_swapped_in_while_the_user_decides_is_refused() {
+        use crate::agents::permissions::{Answer, Broker};
+        use crate::agents::settings::{AgentConfig, Permissions};
+        use crate::events::Events;
+
+        let base = std::env::temp_dir().join(format!("blixel-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("project/docs")).unwrap();
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        std::fs::write(base.join("project/docs/a.md"), "hello\n").unwrap();
+        let base = base.canonicalize().unwrap();
+        let (root, out) = (base.join("project"), base.join("outside"));
+
+        let broker = Arc::new(Broker::default());
+        let events = Events::to_sink({
+            let (broker, root, out) = (broker.clone(), root.clone(), out.clone());
+            move |name, payload| {
+                if name == "agent://permission" {
+                    std::fs::rename(root.join("docs"), root.join("docs.real")).unwrap();
+                    std::os::unix::fs::symlink(&out, root.join("docs")).unwrap();
+                    broker.answer(payload["requestId"].as_str().unwrap(), Answer::Allowed);
+                }
+            }
+        });
+        let config = AgentConfig {
+            id: "t".into(),
+            name: "Tester".into(),
+            instructions: String::new(),
+            read_notes: false,
+            permissions: Permissions {
+                read: Setting::Allow,
+                edit: Setting::Ask,
+                run: Setting::Off,
+                commit: Setting::Off,
+                push: Setting::Off,
+            },
+            edit_paths: String::new(),
+            rule_packs: vec![],
+            connectors: Default::default(),
+            model: "test".into(),
+            effort: "medium".into(),
+            program: String::new(),
+            daily_limit: String::new(),
+            network: true,
+        };
+        let tools = BlixelTools::new(AgentRuntime::new(config, events, broker), root.clone(), sandbox());
+        let refused = |r: CallToolResult| {
+            assert!(r.is_error == Some(true) && format!("{:?}", r.content).contains("symbolic link"), "{r:?}");
+        };
+        let put_back = || {
+            std::fs::remove_file(root.join("docs")).unwrap();
+            std::fs::rename(root.join("docs.real"), root.join("docs")).unwrap();
+        };
+
+        // A new file in a new folder: the folder would be made outside.
+        let file_path = root.join("docs/new/b.md").display().to_string();
+        refused(tools.write(Parameters(WriteArgs { file_path, content: "x".into() })).await.unwrap());
+        put_back();
+        let file_path = root.join("docs/a.md").display().to_string();
+        refused(tools.write(Parameters(WriteArgs { file_path, content: "x".into() })).await.unwrap());
+        put_back();
+        let file_path = root.join("docs/a.md").display().to_string();
+        let edit = EditArgs { file_path, old_string: "hello".into(), new_string: "bye".into(), replace_all: false };
+        refused(tools.edit(Parameters(edit)).await.unwrap());
+
+        assert!(std::fs::read_dir(&out).unwrap().next().is_none(), "nothing was written outside");
+        assert_eq!(std::fs::read_to_string(root.join("docs.real/a.md")).unwrap(), "hello\n");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[tokio::test]
     async fn commands_run_without_input_and_time_out() {
         let dir = std::env::temp_dir();
-        let ran = run_command(&dir, "echo hi; echo err >&2; exit 3", Duration::from_secs(5), &[], |_| {}).await.unwrap();
+        let ran = run_command(&mut cmd(&dir, "echo hi; echo err >&2; exit 3").command, Duration::from_secs(5), &[], |_| {}).await.unwrap();
         assert!(ran.output.contains("hi") && ran.output.contains("err"));
         assert_eq!(ran.code, Some(3));
-        let read = run_command(&dir, "read x; echo got:$x", Duration::from_secs(5), &[], |_| {}).await.unwrap();
+        let read = run_command(&mut cmd(&dir, "read x; echo got:$x").command, Duration::from_secs(5), &[], |_| {}).await.unwrap();
         assert!(read.output.contains("got:"), "stdin is empty, so read returns at once");
-        let slow = run_command(&dir, "sleep 30", Duration::from_millis(300), &[], |_| {}).await.unwrap();
+        let slow = run_command(&mut cmd(&dir, "sleep 30").command, Duration::from_millis(300), &[], |_| {}).await.unwrap();
         assert!(slow.timed_out);
     }
 
-    /// Whether a process has ended (gone, or only waiting to be reaped).
-    #[cfg(target_os = "linux")]
-    fn ended(pid: &str) -> bool {
-        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Err(_) => true,
-            Ok(stat) => stat.rsplit_once(") ").is_some_and(|(_, rest)| rest.starts_with('Z')),
-        }
+    /// A sandbox like an agent's, without cache layers.
+    fn sandbox() -> Arc<Sandbox> {
+        Arc::new(Sandbox::new(Sandbox::home(), None, None))
     }
 
-    /// Waits for a command to write the id of a process it started.
-    async fn started(pidfile: &Path) -> String {
+    /// A command in a sandbox, with the network.
+    fn cmd(dir: &Path, command: &str) -> Prepared {
+        command_for(&sandbox(), dir, command, true, false)
+    }
+
+    /// A sleep's length that no other process here has, to find it by: inside
+    /// the sandbox processes have other ids than outside.
+    fn marker(file: &Path) -> String {
+        let sum = file.to_string_lossy().bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b.into()));
+        format!("300.{}{}", std::process::id(), sum % 100_000)
+    }
+
+    /// Whether a process sleeping for `marker` seconds still runs (zombies
+    /// count as ended). Read from /proc, so never true off Linux.
+    fn running(marker: &str) -> bool {
+        let wanted = format!("sleep\0{marker}\0");
+        std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|entry| {
+            let dir = entry.path();
+            let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
+            let stat = std::fs::read_to_string(dir.join("stat")).unwrap_or_default();
+            let zombie = stat.rsplit_once(") ").is_some_and(|(_, rest)| rest.starts_with('Z'));
+            !zombie && String::from_utf8_lossy(&cmdline) == wanted
+        })
+    }
+
+    /// Waits for a command to say it started its child, and for the child to
+    /// run; returns the child's marker.
+    async fn started(file: &Path) -> String {
         for _ in 0..100 {
-            if let Ok(pid) = std::fs::read_to_string(pidfile) {
-                if !pid.trim().is_empty() {
-                    return pid.trim().to_string();
-                }
+            let said = std::fs::read_to_string(file).is_ok_and(|text| !text.trim().is_empty());
+            if said && (cfg!(not(target_os = "linux")) || running(&marker(file))) {
+                return marker(file);
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -1000,19 +1153,20 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    async fn assert_ended(pid: &str) {
+    async fn assert_ended(marker: &str) {
         for _ in 0..40 {
-            if ended(pid) {
+            if !running(marker) {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("process {pid}, started by the command, still runs");
+        panic!("the sleep {marker}, started by the command, still runs");
     }
 
     /// A command started in the background plus one in the foreground, both long.
-    fn sleeper(pidfile: &Path) -> String {
-        format!("sleep 300 & echo $! > '{}'; sleep 300", pidfile.display())
+    fn sleeper(file: &Path) -> String {
+        let m = marker(file);
+        format!("sleep {m} & echo started > '{}'; sleep {m}", file.display())
     }
 
     #[cfg(target_os = "linux")]
@@ -1027,13 +1181,14 @@ mod tests {
         let run = tokio::spawn({
             let (dir, command, stop, shown) = (dir.clone(), sleeper(&pidfile), stop.clone(), shown.clone());
             async move {
-                run_command(&dir, &command, Duration::from_secs(60), &[CancellationToken::new(), stop], |s| {
+                run_command(&mut cmd(&dir, &command).command, Duration::from_secs(60), &[CancellationToken::new(), stop], |s| {
                     shown.lock().unwrap().push_str(s)
                 })
                 .await
             }
         });
         let pid = started(&pidfile).await;
+        assert!(running(&pid), "the command's child runs");
         stop.cancel();
         let ran = tokio::time::timeout(Duration::from_secs(5), run).await.expect("stops at once").unwrap().unwrap();
         assert!(ran.stopped && !ran.timed_out);
@@ -1041,8 +1196,9 @@ mod tests {
         assert_ended(&pid).await;
 
         // Already stopped: it is killed as soon as it starts.
-        let ran = run_command(&dir, "sleep 300", Duration::from_secs(60), &[stop], |_| {}).await.unwrap();
+        let ran = run_command(&mut cmd(&dir, "sleep 300").command, Duration::from_secs(60), &[stop], |_| {}).await.unwrap();
         assert!(ran.stopped);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Each way a call can be stopped reaches the command: the agent's program
@@ -1087,6 +1243,7 @@ mod tests {
             effort: "medium".into(),
             program: String::new(),
             daily_limit: String::new(),
+            network: true,
         };
         let rt = AgentRuntime::new(config, events, Arc::new(Broker::default()));
         let args = |pidfile: &Path| BashArgs { command: sleeper(pidfile), timeout: None, description: None, run_in_background: false };
@@ -1094,7 +1251,7 @@ mod tests {
 
         // The user's Stop, through the agent's runtime.
         let server = CancellationToken::new();
-        let tools = BlixelTools { stop: server.clone(), ..BlixelTools::new(rt.clone(), root.clone()) };
+        let tools = BlixelTools { stop: server.clone(), ..BlixelTools::new(rt.clone(), root.clone(), sandbox()) };
         let pidfile = root.join("stop.pid");
         let call = tokio::spawn({
             let (tools, a) = (tools.clone(), args(&pidfile));
@@ -1125,7 +1282,7 @@ mod tests {
 
         // The agent's program cancels the call over MCP: rmcp hands the tool that cancel.
         let cancel = CancellationToken::new();
-        let addr = serve(BlixelTools::new(rt.clone(), root.clone()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
+        let addr = serve(BlixelTools::new(rt.clone(), root.clone(), sandbox()), axum::Router::new(), "secret".into(), cancel.clone()).await.unwrap();
         let client = ().serve(StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/mcp")).auth_header("secret"),
         ))
@@ -1149,26 +1306,21 @@ mod tests {
         assert!(log.contains("[stopped]"), "{log}");
     }
 
-    #[test]
-    fn commands_do_not_inherit_what_blixel_holds() {
-        let cmd = command_for(&std::env::temp_dir(), "env");
-        let removed: Vec<String> = cmd
-            .as_std()
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(name, _)| name.to_string_lossy().into_owned())
-            .collect();
-        for name in ["DBUS_SESSION_BUS_ADDRESS", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
-            assert!(removed.iter().any(|r| r == name), "{name} is passed on: {removed:?}");
+    #[tokio::test]
+    async fn commands_do_not_inherit_what_blixel_holds() {
+        let ran = run_command(&mut cmd(&std::env::temp_dir(), "env").command, Duration::from_secs(5), &[], |_| {}).await.unwrap();
+        let names: Vec<&str> = ran.output.lines().filter_map(|l| l.split_once('=').map(|(n, _)| n)).collect();
+        for name in ["DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+            assert!(!names.contains(&name), "{name} is passed on: {names:?}");
         }
-        assert!(!removed.iter().any(|r| r == "PATH" || r == "HOME" || r == "SSH_AUTH_SOCK"), "the user's own environment stays");
+        assert!(names.contains(&"PATH") && names.contains(&"HOME"), "{names:?}");
     }
 
     #[tokio::test]
     async fn long_output_is_kept_bounded() {
         let dir = std::env::temp_dir();
         let mut shown = 0;
-        let ran = run_command(&dir, "head -c 3000000 /dev/zero | tr '\\0' x; echo; echo end", Duration::from_secs(20), &[], |s| {
+        let ran = run_command(&mut cmd(&dir, "head -c 3000000 /dev/zero | tr '\\0' x; echo; echo end").command, Duration::from_secs(20), &[], |s| {
             shown += s.len()
         })
         .await

@@ -3,6 +3,7 @@ mod connectors;
 mod events;
 mod mods;
 mod rules;
+mod safe_fs;
 mod secrets;
 mod store;
 mod workspace;

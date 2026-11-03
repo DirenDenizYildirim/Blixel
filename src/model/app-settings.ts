@@ -119,6 +119,7 @@ function sanitize(raw: Json): AppSettings {
       typingSpeed: int(n.typingSpeed, TYPING_SPEEDS.min, TYPING_SPEEDS.max, d.newAgent.typingSpeed),
       whenIdle: oneOf(n.whenIdle, ["wait", "pick-up"] as const, d.newAgent.whenIdle),
       readNotes: bool(n.readNotes, d.newAgent.readNotes),
+      network: bool(n.network, d.newAgent.network),
       instructions: typeof n.instructions === "string" ? n.instructions.slice(0, MAX_INSTRUCTIONS) : d.newAgent.instructions,
     },
   };

@@ -87,6 +87,13 @@ fn protected() -> &'static ProtectedList {
     })
 }
 
+/// The protected folder and file names, for the sandbox (agents/sandbox.rs),
+/// which makes the ones at the top of a project read-only to commands.
+pub fn protected_names() -> (&'static [String], &'static [String]) {
+    let list = protected();
+    (&list.folders, &list.files)
+}
+
 /// Files that configure or instruct agents, and git's own folder, whose hooks
 /// and config run code. Changing one could widen what an agent may do, so
 /// every change goes to the user first.

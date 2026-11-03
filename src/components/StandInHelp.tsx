@@ -16,6 +16,7 @@ const STEPS: { line: string; does: string }[] = [
   { line: "cost <dollars>", does: "Reports what the session has cost so far, as Claude Code does after a turn." },
   { line: "sleep <time>", does: "Waits: 500 (milliseconds), 500ms or 2s. Stop ends it." },
   { line: "settings", does: "Says the model and thinking effort it runs on." },
+  { line: "instructions", does: "Says your instructions its conversation started with." },
   { line: "fail <reason>", does: "Ends the turn with an error." },
 ];
 

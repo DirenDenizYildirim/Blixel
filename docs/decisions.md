@@ -75,7 +75,8 @@ by Claude together with a second agent, then reported. Chosen:
   Read rebuild the session between turns with `session/resume`, which keeps
   the conversation (the next turn then pays full price, since the prompt
   cache is invalidated). Not chosen: restarting the process, or applying only
-  after a restart.
+  after a restart. (Changed by 11: instructions do not survive a resume, so a change
+  to them starts a new conversation.)
 - **Messages sent mid-turn.** Queued in the core and sent together when the
   turn ends; the bubble shows "queued". Stop, or the agent stopping, hands
   them back to the message box unsent. Not chosen: steering into the running
@@ -312,3 +313,137 @@ At the owner's request, before a real API key goes in; design by Claude.
   drives end-to-end tests of the real agent path without network or cost.
   Not chosen: mocking inside the core (it would skip the protocol, the tool
   server and the gateway, which are what need testing).
+
+## 11. Changed instructions start a new conversation (2026-11-03)
+
+The first run with a real key showed that Claude Code keeps the system prompt
+a session started with when the session is resumed, in the same process or
+a new one, though Blixel sends the new one and the adapter passes it on. So
+changed instructions never reached the model, while the chat said "now works
+with your new settings". Tool settings (Read Off) do apply on a resume. The
+owner chose to start a new conversation; the details were decided by Claude
+with a second agent.
+
+- **What counts:** what the model is told about itself: its name, the user's
+  instructions, its rule packs' text, and the project notes switched on or
+  off. A hash of that text is compared; a change starts a new conversation
+  between turns (`session/new`, the old session closed) or at the next start.
+  Model, effort, Read and connectors still rebuild the same session with
+  `session/resume`, keeping the conversation. Not chosen: sending changed
+  instructions as a message in the conversation (it counts for less than the
+  system prompt, and rule packs need their fence).
+- **Project notes' text does not count:** CLAUDE.md and AGENTS.md are read
+  when a conversation starts. Agents edit them, and counting their text would
+  make an agent lose its conversation at the next restart. An edited notes
+  file no longer rebuilds the session either. Not chosen: counting the text.
+- **A rename counts:** the name is in the instructions, and the agent would
+  otherwise keep the old one.
+- **Saved sessions** keep the hash of their instructions beside the session
+  id, under the same keyed check (rows saved before keep their check). A
+  session saved before the hash was kept starts anew. Not chosen: a file in
+  the agent's program folder (outside the check, and could drift from the
+  session id).
+- **The user is told:** a note in the chat when it happens, and a line above
+  Save in the agent form when the change would start a new conversation. If
+  the new session cannot be started, the old conversation goes on with its
+  old instructions, and the chat says so.
+- **The stand-in** keeps a session's first instructions on a resume, like
+  Claude Code, and its `instructions` line says them, so the end-to-end tests
+  catch this coming back.
+
+## 12. A sandbox for agent commands (2026-11-03)
+
+Planned in 9. The owner chose the three main points; the rest was decided by
+Claude while building.
+
+- **Every command an agent runs goes through bubblewrap** (Linux): the
+  project folder can be changed; the system's folders are read-only; /tmp,
+  /var/tmp, /run, /mnt and /media are empty and private to each command; the
+  command sees no other process (so not the environment of the Claude Code
+  process, which holds the API key: before this, any command could read it
+  from /proc), no session sockets (keychain, desktop) and not Blixel's data.
+- **Home folder (owner):** hidden, except the folders tools live in, and
+  folders on the PATH under home, read-only. Cache folders (~/.cargo, ~/.npm,
+  ~/go, ~/.m2, ~/.cache/pip ...) are shown with a layer of the agent's own
+  over them (overlayfs), kept in Blixel's data beside the agent's program
+  folder: downloads last, and the real caches that other projects use never
+  change. Credential files inside them (~/.cargo/credentials.toml,
+  ~/.m2/settings.xml, ...) read empty; git's own settings are not shown (they
+  can hold credentials). No command runs in a project that holds the home
+  folder or Blixel's data. The lists are in `src-tauri/src/agents/sandbox.rs`.
+  Not chosen: the home folder readable except known secret places (misses
+  unknown ones).
+- **Network (owner):** a switch per agent, on by default; the default for new
+  agents is in Settings. Off gives the command a network of its own, so
+  nothing leaves the machine and no local service is reached. It applies to
+  the next command without a restart. Not chosen yet: only allowed sites
+  (needs a filtering proxy, or Anthropic's sandbox runtime, 0.0.81 now).
+- **Without bubblewrap (owner):** agents run no commands; the chat says why
+  once, the agent is told not to try another way, and nobody is asked about a
+  command that cannot run. The check is made again at the next command, so
+  installing bubblewrap is enough. Not chosen: allowing one agent to run
+  unprotected.
+- **Inside the project**, git's whole folder and the files that instruct
+  agents (the protected list in 3, at the top of the project) are read-only
+  to commands, and such names a command creates (a CLAUDE.md, a `.git` from
+  `git init`, a link) are moved aside afterwards (`CLAUDE.md.from-command`),
+  and the agent and the user are told. Otherwise a command could leave git
+  something that runs outside the sandbox at the user's next git command, or
+  change an agent's instructions without the question that edits get. So
+  agents cannot commit or push from commands for now (git status, diff and
+  log work); a commit made by Blixel itself, behind the Commit setting, can
+  come later. Not chosen: protecting only git's hooks and config (a security
+  review found five ways around it).
+- **Nothing a command can change is handed to bubblewrap as a path:** the
+  protected entries are opened by Blixel without following links and bound by
+  handle, and the folders on the way to a deeper one (a submodule's `.git`)
+  are bound onto themselves so they cannot be renamed. A security review
+  showed why: a link at a protected name was followed out of the sandbox, to
+  the desktop session and the real home. Likewise bubblewrap itself is a
+  root-owned system program, started from `/` with an empty environment (a
+  second review ran a `bwrap` and a library written by a command outside the
+  sandbox), and Blixel's own edits and saves open each file again at write
+  time without following links (`src-tauri/src/safe_fs.rs`), so a folder a
+  command swapped for a link while the user decided is refused.
+- **Commands across agents:** each project's running commands are known
+  together. A protected name that appears while one runs is not trusted by
+  the others (nor read as project notes) and is moved aside when one ends,
+  under a name nobody could take beforehand, after the folder's permissions
+  are put back. In a project without git, a read-only empty `.git` stands
+  while commands run, so none can make a repository that git (the user's,
+  or an agent program's own at its start) would use outside. git folders
+  that a `.git` file points to inside the project, submodules' `.git` and
+  linked work trees' `.git` are read-only too. Nothing is checked or moved
+  until a command's sandbox is empty (a stopped command's processes can
+  outlive bubblewrap for a moment). A protected entry that cannot be checked
+  (a folder without permission) refuses the command, and the permissions of
+  the folders Blixel looks at are put back after each command.
+- **Reviewed three times** by an adversarial agent with real bubblewrap;
+  each round's findings are regression tests in
+  `src-tauri/src/agents/sandbox/tests.rs`, and each fix was checked by
+  breaking it again.
+- **The environment:** commands get only the variables tools need (PATH,
+  language, tool homes such as CARGO_HOME), never one whose name looks like a
+  secret (TOKEN, KEY, SECRET, PASSWORD, AUTH ...) or that carries Java flags
+  (*_OPTS) or Bundler credentials, and with any user and password taken out
+  of addresses in the values. A filter refuses the kernel's keyring calls
+  (the user's keyrings can hold tickets and keys), and a command cannot make
+  namespaces of its own.
+- **One command at a time per agent**, since a cache layer cannot be used by
+  two at once; Stop ends the wait. Agents are told about the sandbox in their
+  instructions, so after this update each agent starts a new conversation
+  once (11). A record changed outside the app is loaded with the network
+  off, like its other settings.
+- **Limits:** with the network on, commands share the machine's network, so
+  they can reach local services and the desktop's abstract sockets (an X11
+  display among them); only an allowed-sites proxy closes that. The edit
+  area (3) still applies to the edit tool only. Protected files deeper in
+  the project, repositories a command makes inside it, and submodules not
+  yet set up are not protected. A protected name that is a link (made by
+  the user) is left as it is; one the user makes while a command runs is
+  moved aside like a command's. ~/.cargo/config.toml stays visible (it
+  rarely holds a token). Copying files into a project still writes by path
+  (only the user's own files could be sent elsewhere). A tool whose folder
+  is not in the lists fails until it is added. Linux only, like the rest of
+  the app.
+

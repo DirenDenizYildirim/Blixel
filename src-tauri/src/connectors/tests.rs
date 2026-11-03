@@ -144,6 +144,7 @@ fn agent(connectors: &[(&str, Setting)]) -> AgentConfig {
         effort: "medium".into(),
         program: String::new(),
         daily_limit: String::new(),
+        network: true,
     }
 }
 
@@ -216,7 +217,7 @@ async fn calls_go_through_the_gateway_and_follow_the_agents_setting() {
     assert_eq!(gw.refresh().await.len(), 1);
     let cancel = CancellationToken::new();
     let root = dir.canonicalize().unwrap();
-    let addr = tools::serve(BlixelTools::new(rt.clone(), root), gw.router(), "tok".into(), cancel.clone()).await.unwrap();
+    let addr = tools::serve(BlixelTools::new(rt.clone(), root, Arc::new(crate::agents::sandbox::Sandbox::new(crate::agents::sandbox::Sandbox::home(), None, None))), gw.router(), "tok".into(), cancel.clone()).await.unwrap();
     let endpoint = format!("http://{addr}/c/stub/mcp");
 
     let wrong = StreamableHttpClientTransport::from_config(StreamableHttpClientTransportConfig::with_uri(endpoint.clone()).auth_header("nope"));

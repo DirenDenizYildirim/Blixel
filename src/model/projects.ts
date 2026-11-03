@@ -19,7 +19,7 @@ import {
 } from "./core-api";
 import { setEditorOpen } from "./layout";
 import { playOpeningScene } from "./mock-agent";
-import { flushSaves, loadProject, settleOpenProject } from "./persist";
+import { agentFromSaved, flushSaves, loadProject, settleOpenProject } from "./persist";
 import { demoProject, PLACEHOLDER_AGENTS } from "./placeholders";
 import { ask, notify, setWorkspaceName, showView, switchWorkspace, uid, useStore } from "./store";
 import type { Agent, Project, SavedAgent } from "./types";
@@ -161,7 +161,7 @@ export async function savedAgentsOf(projectId: string): Promise<SavedAgent[]> {
   const s = get();
   if (projectId === s.projectId) return s.agents.map((agent) => ({ agent, trust: s.agentTrust[agent.id] ?? "ok" }));
   if (projectId === "demo") return PLACEHOLDER_AGENTS.map((agent) => ({ agent, trust: "ok" }));
-  return agentsList(projectId);
+  return (await agentsList(projectId)).map((s) => ({ ...s, agent: agentFromSaved(s.agent) }));
 }
 
 export const agentsOf = async (projectId: string): Promise<Agent[]> => (await savedAgentsOf(projectId)).map((s) => s.agent);

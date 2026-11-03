@@ -42,6 +42,12 @@ export function NewAgentSettings() {
             />
           </div>
         ))}
+        <div className="net-row">
+          <Switch label="Commands may use the network" checked={d.network} onChange={(v) => updateNewAgent({ network: v })} />
+          <div className="hint-line">
+            Commands run in a sandbox: they can change only the project's folder and cannot see the rest of your home folder.
+          </div>
+        </div>
       </div>
 
       <div className="set-block">

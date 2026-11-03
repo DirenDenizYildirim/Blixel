@@ -28,6 +28,8 @@ export interface Agent {
   permissions: Record<ToolId, Permission>;
   /** Where it may edit, as .gitignore-style patterns. Empty means the whole project. */
   editPaths: string;
+  /** Whether its commands may use the network. Commands always run in a sandbox. */
+  network: boolean;
   /**
    * Rule packs from mods that the user attached to this agent. Their content
    * is copied in when attached, so updating a mod never changes an agent's
@@ -260,6 +262,8 @@ export interface NewAgentDefaults {
   typingSpeed: number;
   whenIdle: "wait" | "pick-up";
   readNotes: boolean;
+  /** Whether its commands may use the network. */
+  network: boolean;
   instructions: string;
 }
 
@@ -300,6 +304,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     typingSpeed: 12,
     whenIdle: "wait",
     readNotes: true,
+    network: true,
     instructions: "",
   },
 };

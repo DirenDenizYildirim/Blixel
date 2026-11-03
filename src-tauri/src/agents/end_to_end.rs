@@ -19,7 +19,8 @@ use crate::store::{Db, DbRef};
 
 use super::permissions::{Answer, Broker};
 use super::runtime::AgentRuntime;
-use super::session::{self, Command, Launch};
+use super::sandbox::Sandbox;
+use super::session::{self, Command, Earlier, Launch};
 use super::settings::{AgentConfig, Permissions, Setting, STAND_IN};
 use super::usage::{self, Books};
 
@@ -47,6 +48,7 @@ fn config() -> AgentConfig {
         effort: "medium".into(),
         program: STAND_IN.into(),
         daily_limit: String::new(),
+        network: true,
     }
 }
 
@@ -65,9 +67,17 @@ struct Harness {
     answer: Arc<Mutex<Option<Answer>>>,
     tx: Option<mpsc::UnboundedSender<Command>>,
     task: Option<JoinHandle<Result<(), String>>>,
-    /// The session id the agent last reported.
+    /// The session id the agent last reported...
     session: Arc<Mutex<Option<String>>>,
+    /// ...and the hash of the instructions it started with.
+    told: Arc<Mutex<Option<String>>>,
     next: usize,
+    /// Runs Claude Code with this key instead of the stand-in (the `real` tests).
+    api_key: Option<String>,
+    /// How long to wait for an event.
+    wait: Duration,
+    /// The sandbox's program (bubblewrap, unless a test takes it away).
+    bwrap: PathBuf,
 }
 
 impl Harness {
@@ -102,21 +112,51 @@ impl Harness {
         let rt = AgentRuntime::new(config, events, broker);
         rt.usage.keep_in(Books { db: DbRef::Own(db.clone()), project: "p1".into() });
         let config_dir = base.join("config");
-        Harness { base, root, config_dir, rt, hub, db, log, answer, tx: None, task: None, session: Arc::default(), next: 0 }
+        Harness {
+            base,
+            root,
+            config_dir,
+            rt,
+            hub,
+            db,
+            log,
+            answer,
+            tx: None,
+            task: None,
+            session: Arc::default(),
+            told: Arc::default(),
+            next: 0,
+            api_key: None,
+            wait: WAIT,
+            bwrap: PathBuf::from(super::sandbox::BWRAP),
+        }
     }
 
-    /// Starts the agent's program, carrying on `resume` if given.
+    /// Starts the agent's program, carrying on the session `resume` if given,
+    /// as the app does: with the instructions it was last reported with.
     fn start(&mut self, resume: Option<String>) {
+        let told = self.told.lock().unwrap().clone();
+        self.start_from(resume.map(|id| Earlier { id, instructions: told }));
+    }
+
+    fn start_from(&mut self, resume: Option<Earlier>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let session = self.session.clone();
+        let (session, told) = (self.session.clone(), self.told.clone());
         let task = tokio::spawn(session::run(
             self.rt.clone(),
             self.root.clone(),
             self.config_dir.clone(),
-            Launch::StandIn { exe: stand_in() },
+            match &self.api_key {
+                Some(api_key) => Launch::ClaudeCode { api_key: api_key.clone() },
+                None => Launch::StandIn { exe: stand_in() },
+            },
+            Sandbox::with_program(self.bwrap.clone(), Sandbox::home(), None, Some(self.base.join("layers"))),
             self.hub.clone(),
             resume,
-            Box::new(move |id| *session.lock().unwrap() = Some(id.to_string())),
+            Box::new(move |id, instructions| {
+                *session.lock().unwrap() = Some(id.to_string());
+                *told.lock().unwrap() = Some(instructions.to_string());
+            }),
             rx,
         ));
         self.tx = Some(tx);
@@ -126,7 +166,7 @@ impl Harness {
     /// Ends the agent's program, as closing its channel does in the app.
     async fn stop(&mut self) {
         self.tx = None;
-        let outcome = tokio::time::timeout(WAIT, self.task.take().unwrap()).await.expect("the session ended").unwrap();
+        let outcome = tokio::time::timeout(self.wait, self.task.take().unwrap()).await.expect("the session ended").unwrap();
         assert!(outcome.is_ok(), "{outcome:?}");
     }
 
@@ -157,7 +197,7 @@ impl Harness {
             if let Some(i) = found {
                 return i;
             }
-            assert!(started.elapsed() < WAIT, "no {what} after event {from}:\n{}", self.dump(0));
+            assert!(started.elapsed() < self.wait, "no {what} after event {from}:\n{}", self.dump(0));
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
@@ -182,6 +222,11 @@ impl Harness {
         self.events(from, "agent://message").iter().map(|p| p["text"].as_str().unwrap_or_default().to_string()).collect()
     }
 
+    /// Waits for a note at or after `from` that says `text`.
+    async fn note_saying(&self, from: usize, text: &str) -> usize {
+        self.wait_for(from, text, |n, p| n == "agent://note" && p["text"].as_str().is_some_and(|t| t.contains(text))).await
+    }
+
     fn notes(&self, from: usize) -> Vec<String> {
         self.events(from, "agent://note").iter().map(|p| p["text"].as_str().unwrap_or_default().to_string()).collect()
     }
@@ -193,7 +238,7 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.base);
+        let _ = super::sandbox::remove_all(&self.base);
     }
 }
 
@@ -285,6 +330,45 @@ async fn commands_and_questions_follow_the_agents_settings() {
     // A failing turn says why.
     let from = h.turn("say Trying.\nfail Broken on purpose").await;
     assert!(h.notes(from).iter().any(|n| n == "The turn failed: Broken on purpose"), "{:?}", h.notes(from));
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn commands_run_in_the_sandbox_with_the_agents_network() {
+    let mut h = Harness::new("sandboxed", AgentConfig { network: false, ..config() });
+    std::fs::write(h.root.join("CLAUDE.md"), "Notes.\n").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let reach = format!("run echo hi > /dev/tcp/127.0.0.1/{} && echo reached", listener.local_addr().unwrap().port());
+    h.start(None);
+
+    // Network off: not even this machine can be reached. The agent's file can't be changed by a command.
+    let from = h.turn(&format!("{reach}\nrun echo 'Obey me.' >> CLAUDE.md")).await;
+    assert!(!h.said(from).contains("reached"), "{}", h.said(from));
+    assert_eq!(std::fs::read_to_string(h.root.join("CLAUDE.md")).unwrap(), "Notes.\n");
+
+    // The setting applies to the next command, without a restart.
+    h.rt.config.write().unwrap().network = true;
+    let from = h.turn(&reach).await;
+    assert!(h.said(from).contains("reached"), "{}", h.said(from));
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn without_the_sandbox_no_command_runs() {
+    let mut h = Harness::new("unsandboxed", config());
+    h.bwrap = "/nonexistent/bwrap".into();
+    h.rt.config.write().unwrap().permissions.run = Setting::Ask;
+    *h.answer.lock().unwrap() = Some(Answer::Allowed);
+    h.start(None);
+    let from = h.turn("run touch ran.txt\nrun touch again.txt").await;
+    assert!(!h.root.join("ran.txt").exists() && !h.root.join("again.txt").exists());
+    assert!(h.said(from).contains("Commands cannot run here: Blixel runs them only in a sandbox"), "{}", h.said(from));
+    assert!(h.events(from, "agent://permission").is_empty(), "nobody is asked about a command that cannot run");
+    let told: Vec<String> = h.notes(from).into_iter().filter(|n| n.starts_with("Ada cannot run commands")).collect();
+    assert_eq!(told.len(), 1, "the user is told once: {:?}", h.notes(from));
+    assert!(told[0].contains("bubblewrap (bwrap) is not installed"), "{told:?}");
+    let refused = h.events(from, "agent://activity");
+    assert!(refused.iter().any(|a| a["result"] == "no sandbox" && a["refused"] == true), "{}", h.dump(from));
     h.stop().await;
 }
 
@@ -386,12 +470,16 @@ async fn spending_adds_up_across_restarts_and_the_limit_holds() {
     h.stop().await;
 }
 
-/// Whether a process has ended (or is only waiting to be reaped).
-fn ended(pid: &str) -> bool {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Err(_) => true,
-        Ok(stat) => stat.rsplit(')').next().is_some_and(|rest| rest.trim_start().starts_with('Z')),
-    }
+/// Whether a process sleeping for `seconds` (a length no other process here
+/// has) still runs. Inside the sandbox processes have other ids than outside,
+/// so it is found by what it runs.
+fn running(seconds: &str) -> bool {
+    let wanted = format!("sleep\0{seconds}\0");
+    std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|entry| {
+        let stat = std::fs::read_to_string(entry.path().join("stat")).unwrap_or_default();
+        let zombie = stat.rsplit(')').next().is_some_and(|rest| rest.trim_start().starts_with('Z'));
+        !zombie && std::fs::read(entry.path().join("cmdline")).is_ok_and(|c| String::from_utf8_lossy(&c) == wanted)
+    })
 }
 
 #[tokio::test]
@@ -412,22 +500,22 @@ async fn stop_ends_a_wait_and_kills_a_running_command() {
 
     if cfg!(target_os = "linux") {
         let from = h.len();
-        h.send("run echo $$ > shell.pid; sleep 30; echo too-late");
+        let seconds = format!("30.{}", std::process::id());
+        h.send(&format!("run echo started > shell.pid; sleep {seconds}; echo too-late"));
         let pid_file = h.root.join("shell.pid");
         let started = Instant::now();
         while std::fs::read_to_string(&pid_file).map(|p| p.trim().is_empty()).unwrap_or(true) {
             assert!(started.elapsed() < WAIT, "the command never started:\n{}", h.dump(from));
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_string();
-        assert!(!ended(&pid));
+        assert!(running(&seconds), "the command's sleep runs");
         let working = h.status(from, &["working"]).await;
         let stopped_at = Instant::now();
         h.command(Command::Cancel);
         h.status(working, &["idle"]).await;
         assert!(stopped_at.elapsed() < Duration::from_secs(5));
         let started = Instant::now();
-        while !ended(&pid) {
+        while running(&seconds) {
             assert!(started.elapsed() < Duration::from_secs(5), "the command still runs");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -463,6 +551,98 @@ async fn a_restarted_agent_carries_on_its_session() {
     h.stop().await;
 }
 
+/// Claude Code keeps the instructions a session started with when it is
+/// resumed (the stand-in does too), so a change to them starts a new
+/// conversation; other changes, and restarts without one, carry on.
+#[tokio::test]
+async fn changed_instructions_start_a_new_conversation() {
+    let mut h = Harness::new("instructions", AgentConfig { instructions: "Be brief.".into(), ..config() });
+    std::fs::write(h.root.join("CLAUDE.md"), "Notes.\n").unwrap();
+    let id = |h: &Harness| h.session.lock().unwrap().clone().unwrap();
+    let new_conversation = "Ada's instructions changed, so it starts a new conversation and does not remember the messages above.";
+    h.start(None);
+    let from = h.turn("instructions").await;
+    assert!(h.said(from).contains("Instructions: Be brief."), "{}", h.said(from));
+    let first = id(&h);
+
+    // New instructions: a new session that has them, and the old one is closed.
+    h.rt.config.write().unwrap().instructions = "Be thorough.".into();
+    h.command(Command::Settings);
+    let from = h.turn("instructions").await;
+    assert!(h.said(from).contains("Instructions: Be thorough."), "{}", h.dump(from));
+    assert!(h.notes(from).iter().any(|n| n == new_conversation), "{:?}", h.notes(from));
+    let second = id(&h);
+    assert_ne!(second, first);
+
+    // A tool setting is applied to the same session, keeping the conversation.
+    h.rt.config.write().unwrap().permissions.read = Setting::Off;
+    h.command(Command::Settings);
+    let from = h.turn("say Still here.").await;
+    assert!(h.notes(from).iter().any(|n| n == "Ada now works with your new settings."), "{:?}", h.notes(from));
+    assert_eq!(id(&h), second);
+
+    // An edited CLAUDE.md is read when a conversation starts: nothing is rebuilt for it.
+    std::fs::write(h.root.join("CLAUDE.md"), "Other notes.\n").unwrap();
+    h.command(Command::Settings);
+    let from = h.turn("say Same.").await;
+    assert!(h.notes(from).is_empty(), "{:?}", h.notes(from));
+    assert_eq!(id(&h), second);
+    h.stop().await;
+
+    // A restart with the same instructions carries on...
+    let before = h.len();
+    h.start(Some(second.clone()));
+    let from = h.turn("instructions").await;
+    assert!(h.said(from).contains("Be thorough."), "{}", h.said(from));
+    assert!(h.notes(before).iter().all(|n| !n.contains("new conversation")), "{:?}", h.notes(before));
+    assert_eq!(id(&h), second);
+    h.stop().await;
+
+    // ...and with changed ones (the name counts too) starts a new conversation.
+    h.rt.config.write().unwrap().name = "Ada Two".into();
+    let before = h.len();
+    h.start(Some(second.clone()));
+    h.turn("say Hello.").await;
+    let renamed = "Ada Two's instructions changed, so it starts a new conversation and does not remember the messages above.";
+    assert!(h.notes(before).iter().any(|n| n == renamed), "{:?}", h.notes(before));
+    let third = id(&h);
+    assert_ne!(third, second);
+    h.stop().await;
+
+    // A change before the new conversation's first message: nothing to keep
+    // yet (it cannot be resumed), so its settings go to another new session.
+    h.start(Some(third.clone()));
+    h.turn("say Hello again.").await;
+    let from = h.len();
+    h.rt.config.write().unwrap().instructions = "Be quick.".into();
+    h.command(Command::Settings);
+    h.note_saying(from, "starts a new conversation").await;
+    let from = h.len();
+    h.rt.config.write().unwrap().permissions.read = Setting::Allow;
+    h.command(Command::Settings);
+    h.note_saying(from, "now works with your new settings").await;
+    let from = h.turn("instructions").await;
+    assert!(h.said(from).contains("Instructions: Be quick."), "{}", h.dump(from));
+    assert!(h.notes(from).iter().all(|n| !n.contains("could not be applied")), "{:?}", h.notes(from));
+    let fourth = id(&h);
+
+    // A new conversation with no message yet is not kept for next time.
+    let from = h.len();
+    h.rt.config.write().unwrap().instructions = "Be slow.".into();
+    h.command(Command::Settings);
+    h.note_saying(from, "starts a new conversation").await;
+    h.stop().await;
+    assert_eq!(id(&h), fourth, "a session with no message was kept");
+
+    // A session saved before its instructions were kept starts anew.
+    let before = h.len();
+    h.start_from(Some(Earlier { id: fourth.clone(), instructions: None }));
+    h.turn("say Hello.").await;
+    assert!(h.notes(before).iter().any(|n| n == "Ada Two starts a new conversation; earlier messages are from a previous session."));
+    assert_ne!(id(&h), fourth);
+    h.stop().await;
+}
+
 #[tokio::test]
 async fn model_and_effort_are_set_on_the_live_session() {
     let mut h = Harness::new("options", AgentConfig { model: "stand-in-2".into(), effort: "high".into(), ..config() });
@@ -488,4 +668,296 @@ async fn model_and_effort_are_set_on_the_live_session() {
     assert!(h.notes(from).iter().any(|n| n.starts_with("Could not set the model to sonnet")), "{:?}", h.notes(from));
     assert!(h.said(from).contains("Model: stand-in-2."));
     h.stop().await;
+}
+
+/// The same path with Claude Code itself and a real API key, read from
+/// `BLIXEL_REAL_KEY`. Costs money and needs the network, so these only run
+/// with `cargo test real_ -- --ignored --nocapture`, and pass without
+/// running anything when the variable is not set. They check what Blixel
+/// observed (files, edits, commands, questions, spending), never the
+/// model's exact words.
+mod real {
+    use super::*;
+
+    const REAL_WAIT: Duration = Duration::from_secs(240);
+
+    fn config() -> AgentConfig {
+        AgentConfig { program: String::new(), model: "sonnet".into(), effort: "low".into(), ..super::config() }
+    }
+
+    fn harness(name: &str, config: AgentConfig) -> Option<Harness> {
+        let Ok(key) = std::env::var("BLIXEL_REAL_KEY") else {
+            eprintln!("BLIXEL_REAL_KEY is not set: skipped");
+            return None;
+        };
+        let mut h = Harness::new(&format!("real-{name}"), config);
+        h.api_key = Some(key);
+        h.wait = REAL_WAIT;
+        Some(h)
+    }
+
+    impl Harness {
+        /// Prints what happened since `from`, for reading the run.
+        fn report(&self, from: usize, label: &str) {
+            eprintln!("==== {label}");
+            let mut usage = None;
+            for (name, p) in self.log.lock().unwrap().iter().skip(from) {
+                match name.as_str() {
+                    "agent://activity" if p["live"] == false => {
+                        eprintln!("  {} {} -> {}{}", p["verb"], p["target"], p["result"], if p["refused"] == true { " (refused)" } else { "" })
+                    }
+                    "agent://permission" => eprintln!("  ASKED {} | {} | {}", p["tool"], p["title"], p["detail"]),
+                    "agent://edit" => eprintln!("  edit event: {}", p["path"]),
+                    "agent://shell" if !p["title"].is_null() => eprintln!("  shell $ {}", p["title"]),
+                    "agent://note" => eprintln!("  note: {}", p["text"]),
+                    "agent://usage" => usage = Some(p.clone()),
+                    _ => {}
+                }
+            }
+            if let Some(u) = usage {
+                eprintln!("  usage: today {} turn {}", u["todayUsd"], u["turnUsd"]);
+            }
+            eprintln!("  said: {}", self.said(from).replace('\n', " ⏎ "));
+        }
+
+        fn shell_titles(&self, from: usize) -> Vec<String> {
+            self.events(from, "agent://shell").iter().filter_map(|s| s["title"].as_str().map(str::to_owned)).collect()
+        }
+
+        fn shell_output(&self, from: usize) -> String {
+            self.events(from, "agent://shell").iter().map(|s| s["data"].as_str().unwrap_or_default().to_owned()).collect()
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "runs Claude Code with the key in BLIXEL_REAL_KEY: network and cost"]
+    async fn real_edits_and_commands_go_through_blixel() {
+        let Some(mut h) = harness("routing", config()) else { return };
+        h.start(None);
+        let from = h
+            .turn(
+                "Create a file named hello.txt whose only line is `hi`. Then edit that file so the line says \
+                 `hello` instead. Then run `cat hello.txt` and tell me what it printed. Don't ask me anything.",
+            )
+            .await;
+        h.report(from, "routing");
+
+        let text = std::fs::read_to_string(h.root.join("hello.txt")).expect("hello.txt was created");
+        assert_eq!(text.trim(), "hello", "{}", h.dump(from));
+        // Every change reached the interface through Blixel's own tools: a
+        // built-in Write or Edit would change the file with no edit event.
+        let edits = h.events(from, "agent://edit");
+        assert!(!edits.is_empty(), "no edit came through Blixel:\n{}", h.dump(from));
+        assert!(edits.iter().all(|e| e["path"] == "hello.txt" && e["agentId"] == "ada"), "{edits:?}");
+        assert!(h.shell_titles(from).iter().any(|t| t.contains("cat hello.txt")), "the command did not run in Blixel's shell:\n{}", h.dump(from));
+        assert!(h.shell_output(from).contains("hello"), "{}", h.shell_output(from));
+        // Everything is allowed, so neither Blixel nor the adapter asked.
+        assert!(h.events(from, "agent://permission").is_empty(), "something asked:\n{}", h.dump(from));
+        // The spending was counted, and the program reported its models.
+        let spent = h.events(from, "agent://usage").iter().filter_map(|u| u["todayUsd"].as_f64()).fold(0.0, f64::max);
+        assert!(spent > 0.0, "no spending was counted:\n{}", h.dump(from));
+        let models = h.events(0, "agent://models");
+        assert!(!models.is_empty(), "no models were reported");
+        eprintln!("  models: {}", models.last().unwrap());
+        h.stop().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "runs Claude Code with the key in BLIXEL_REAL_KEY: network and cost"]
+    async fn real_settings_hold() {
+        let mut config = config();
+        config.permissions.run = Setting::Ask;
+        let Some(mut h) = harness("settings", config) else { return };
+        std::fs::write(h.root.join("CLAUDE.md"), "Project notes.\n").unwrap();
+        h.start(None);
+        let asked_about = |h: &Harness, from: usize, what: &str| {
+            h.events(from, "agent://permission").iter().any(|a| a["detail"].as_str().is_some_and(|d| d.contains(what)))
+        };
+
+        // Run on Ask: allowed once, it runs.
+        *h.answer.lock().unwrap() = Some(Answer::Allowed);
+        let from = h.turn("Run the command `echo blixel-allowed` and tell me its output.").await;
+        h.report(from, "run on ask, allowed");
+        assert!(asked_about(&h, from, "blixel-allowed"), "not asked:\n{}", h.dump(from));
+        assert!(h.shell_output(from).contains("blixel-allowed"), "{}", h.dump(from));
+
+        // Denied: it never runs.
+        *h.answer.lock().unwrap() = Some(Answer::Denied);
+        let from = h.turn("Run the command `echo blixel-denied`. If you can't, say so and stop.").await;
+        h.report(from, "run on ask, denied");
+        assert!(asked_about(&h, from, "blixel-denied"), "not asked:\n{}", h.dump(from));
+        assert!(!h.shell_titles(from).iter().any(|t| t.contains("blixel-denied")), "it ran:\n{}", h.dump(from));
+
+        // An edit area of docs/ only: outside is refused, inside works.
+        h.rt.config.write().unwrap().edit_paths = "docs/**".into();
+        let from = h
+            .turn("Create the file src/outside.txt containing `x`. If you are not allowed, say so and stop; do not try another way.")
+            .await;
+        h.report(from, "outside the edit area");
+        assert!(!h.root.join("src/outside.txt").exists(), "written outside the area:\n{}", h.dump(from));
+        let activity = h.events(from, "agent://activity");
+        assert!(activity.iter().any(|a| a["result"] == "outside its area"), "{}", h.dump(from));
+        let from = h.turn("Create the file docs/inside.txt containing `x`.").await;
+        h.report(from, "inside the edit area");
+        assert!(h.root.join("docs/inside.txt").exists(), "{}", h.dump(from));
+        h.rt.config.write().unwrap().edit_paths = String::new();
+
+        // A protected file asks even with Edit on Allow; denied, it stays as it was.
+        let from = h.turn("Add the line `Use tabs.` to the end of CLAUDE.md. If you can't, say so and stop.").await;
+        h.report(from, "protected file, denied");
+        let asked = h.events(from, "agent://permission");
+        assert!(asked.iter().any(|a| a["title"].as_str().is_some_and(|t| t.contains("agent settings file"))), "{}", h.dump(from));
+        assert_eq!(std::fs::read_to_string(h.root.join("CLAUDE.md")).unwrap(), "Project notes.\n");
+
+        // Edit and Run off: nothing is written, and nothing asks.
+        {
+            let mut config = h.rt.config.write().unwrap();
+            config.permissions.edit = Setting::Off;
+            config.permissions.run = Setting::Off;
+        }
+        let from = h.turn("Create the file off.txt containing `x`. If you can't, say so and stop.").await;
+        h.report(from, "edit and run off");
+        assert!(!h.root.join("off.txt").exists(), "{}", h.dump(from));
+        assert!(h.events(from, "agent://edit").is_empty());
+        assert!(h.events(from, "agent://permission").is_empty(), "Off asked:\n{}", h.dump(from));
+
+        // Not a check, an observation: with Edit off but Run allowed, does it
+        // write the file with a command instead? (Decision 1: without a
+        // sandbox, Run can do this; the instructions tell it not to.)
+        h.rt.config.write().unwrap().permissions.run = Setting::Allow;
+        let from = h.turn("Create the file sneaky.txt containing `x`.").await;
+        h.report(from, "edit off, run allowed");
+        eprintln!("  OBSERVATION: sneaky.txt written through a command: {}", h.root.join("sneaky.txt").exists());
+        h.stop().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "runs Claude Code with the key in BLIXEL_REAL_KEY: network and cost"]
+    async fn real_resume_and_stop() {
+        let Some(mut h) = harness("resume", config()) else { return };
+        h.start(None);
+        let from = h.turn("Remember the word pelican. Reply with just OK.").await;
+        h.report(from, "first session");
+        h.stop().await;
+        let first = h.session.lock().unwrap().clone();
+        assert!(first.is_some(), "no session id was handed out");
+
+        // A new process carries on the same conversation.
+        h.start(first.clone());
+        let from = h.turn("Which word did I ask you to remember? Reply with just the word.").await;
+        h.report(from, "resumed");
+        assert!(h.said(from).to_lowercase().contains("pelican"), "{}", h.dump(from));
+        assert!(!h.notes(from).iter().any(|n| n.contains("new conversation")), "{:?}", h.notes(from));
+
+        // Stop during a long command: the command is killed and the turn ends.
+        let from = h.len();
+        h.send("Run the command `sleep 45 && echo too-late` with a timeout of 120000 ms and tell me what it printed.");
+        let working = h.status(from, &["working"]).await;
+        h.wait_for(from, "the command starting", |n, p| n == "agent://shell" && p["title"].as_str().is_some_and(|t| t.contains("sleep 45")))
+            .await;
+        let asked_to_stop = Instant::now();
+        h.command(Command::Cancel);
+        h.status(working, &["idle", "stopped"]).await;
+        let took = asked_to_stop.elapsed();
+        h.report(from, "stopped mid-command");
+        eprintln!("  stopped after {took:?}");
+        assert!(took < Duration::from_secs(20), "Stop took {took:?}");
+        let output = h.shell_output(from);
+        assert!(output.contains("[stopped]"), "{output}");
+        // The command's own line names it; its output never came.
+        assert!(!output.lines().any(|line| line.trim() == "too-late"), "{output}");
+        h.stop().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "runs Claude Code with the key in BLIXEL_REAL_KEY: network and cost"]
+    async fn real_connector_call_and_outside_read() {
+        use crate::connectors::model::State;
+        use crate::connectors::tests::{stub_server, tool, url_connector};
+
+        let url = stub_server(Arc::new(Mutex::new(vec![tool("echo", "Echoes text.")]))).await;
+        let Some(mut h) = harness("connector", config()) else { return };
+        let c = h.hub.save(url_connector(&url, "s3cret")).await.unwrap();
+        let State::Changed { hash, .. } = h.hub.test(&c.id).await.unwrap() else { panic!("never approved, so changed") };
+        h.hub.approve(&c.id, &hash).unwrap();
+        h.rt.config.write().unwrap().connectors.insert(c.id.clone(), Setting::Allow);
+        h.start(None);
+
+        // A connector's tool, called through Blixel's gateway.
+        let from = h.turn("Call the echo tool of the stub connector with the text `hi there` and tell me exactly what it returned.").await;
+        h.report(from, "connector call");
+        let calls: Vec<Value> = h.events(from, "agent://activity").into_iter().filter(|a| a["verb"] == "CALL").collect();
+        assert!(calls.iter().any(|a| a["target"] == "Stub · echo" && a["result"] == "done"), "{}", h.dump(from));
+        assert!(h.said(from).contains("hi there"), "{}", h.said(from));
+
+        // A read outside the project asks first; denied, nothing is read.
+        let outside = h.root.parent().unwrap().join("outside.txt");
+        std::fs::write(&outside, "secret-outside-word\n").unwrap();
+        *h.answer.lock().unwrap() = Some(Answer::Denied);
+        let from = h.turn(&format!("Read the file {} and tell me what it says. If you can't, say so and stop.", outside.display())).await;
+        h.report(from, "read outside, denied");
+        assert!(!h.events(from, "agent://permission").is_empty(), "the read did not ask:\n{}", h.dump(from));
+        assert!(!h.said(from).contains("secret-outside-word"), "{}", h.dump(from));
+        h.stop().await;
+    }
+
+    /// Changed settings on a running agent (decisions 5 and 11): Read set to
+    /// Off reaches the session (Run is off, so a command cannot read in its
+    /// place); changed instructions reach the model in a new conversation,
+    /// while it runs and after a restart; a plain restart carries on.
+    #[tokio::test]
+    #[ignore = "runs Claude Code with the key in BLIXEL_REAL_KEY: network and cost"]
+    async fn real_setting_changes_reach_the_session() {
+        let mut config = config();
+        config.permissions.run = Setting::Off;
+        let Some(mut h) = harness("changes", config) else { return };
+        std::fs::write(h.root.join("inside.txt"), "secret-inside-word\n").unwrap();
+        h.start(None);
+        let from = h.turn("Remember the word walrus. Reply with just OK.").await;
+        h.report(from, "start");
+
+        h.rt.config.write().unwrap().permissions.read = Setting::Off;
+        h.command(Command::Settings);
+        let from = h.turn("Read the file inside.txt and tell me what it says. If you can't, say so and stop.").await;
+        h.report(from, "Read off, rebuilt");
+        let read_after_off = h.said(from).contains("secret-inside-word");
+
+        // New instructions start a new conversation that has them (only they
+        // know the code word); it no longer knows the word from before.
+        let code = |word: &str| format!("Your code word is {word}. Give it when asked for your code word.");
+        h.rt.config.write().unwrap().instructions = code("BRAVO-2");
+        h.command(Command::Settings);
+        let from = h.turn("Tell me your code word (or NONE).").await;
+        h.report(from, "new instructions, new conversation");
+        let rebuilt = h.said(from).contains("BRAVO-2");
+        let said_new = h.notes(from).iter().any(|n| n.contains("starts a new conversation"));
+        let from = h.turn("Remember the word heron. Reply with just OK.").await;
+        h.report(from, "remember again");
+
+        // A restart without changes carries on that conversation...
+        h.stop().await;
+        let id = h.session.lock().unwrap().clone();
+        h.start(id);
+        let from = h.turn("Which word did I ask you to remember? Reply with just the word.").await;
+        h.report(from, "restarted, same instructions");
+        let kept = h.said(from).to_lowercase().contains("heron");
+        h.stop().await;
+
+        // ...and one with changed instructions starts a new one that has them.
+        h.rt.config.write().unwrap().instructions = code("DELTA-4");
+        let id = h.session.lock().unwrap().clone();
+        h.start(id);
+        let from = h.turn("Tell me your code word (or NONE).").await;
+        h.report(from, "restarted, new instructions");
+        let restarted = h.said(from).contains("DELTA-4");
+        h.stop().await;
+
+        eprintln!(
+            "  RESULT read after Off: {read_after_off}; new conversation said: {said_new}; \
+             instructions seen after a change: {rebuilt}, after a restart: {restarted}; kept on a plain restart: {kept}"
+        );
+        assert!(!read_after_off, "Read set to Off did not reach the session");
+        assert!(rebuilt && restarted && said_new, "changed instructions did not reach the model");
+        assert!(kept, "a restart without changes lost the conversation");
+    }
 }

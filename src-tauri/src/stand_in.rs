@@ -27,6 +27,9 @@
 //!   does after each turn.
 //! - `sleep <ms>`: waits ("2s" and "500ms" work too); Stop ends it.
 //! - `settings`: says the model and effort it runs on.
+//! - `instructions`: says the user's instructions its session started with.
+//!   Like Claude Code, a resumed session keeps those, whatever it is
+//!   resumed with; and a session with no message yet cannot be resumed.
 //! - `fail <text>`: ends the turn with an error.
 //!
 //! Lines it does not know are echoed back. A message with no instruction at
@@ -39,12 +42,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, Cost, Implementation, InitializeRequest,
+    AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Cost, Implementation, InitializeRequest,
     InitializeResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities, McpServer, Meta, NewSessionRequest,
     NewSessionResponse, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionOutcome,
     RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption, SessionId, SessionNotification,
-    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason,
+    SessionCloseCapabilities, SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption, SessionId,
+    SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason,
     TextContent, ToolCall, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     UsageUpdate,
 };
@@ -156,6 +159,19 @@ async fn serve() -> Result<(), Error> {
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            {
+                let me = me.clone();
+                // Like the adapter: the session is put away; its transcript stays.
+                async move |request: CloseSessionRequest, responder: Responder<CloseSessionResponse>, _cx| {
+                    match me.sessions.lock().expect("sessions lock").remove(&*request.session_id.0) {
+                        Some(_) => responder.respond(CloseSessionResponse::new()),
+                        None => responder.respond_with_error(Error::invalid_params().data("This stand-in has no such session.")),
+                    }
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .on_receive_notification(
             {
                 let me = me.clone();
@@ -172,12 +188,12 @@ async fn serve() -> Result<(), Error> {
         .await
 }
 
-/// Capabilities as the adapter advertises them: sessions can be loaded and
-/// resumed, and MCP servers are reached over HTTP.
+/// Capabilities as the adapter advertises them: sessions can be loaded,
+/// resumed and closed, and MCP servers are reached over HTTP.
 fn initialize(_request: &InitializeRequest) -> InitializeResponse {
     let capabilities = AgentCapabilities::new()
         .load_session(true)
-        .session_capabilities(SessionCapabilities::new().resume(SessionResumeCapabilities::new()))
+        .session_capabilities(SessionCapabilities::new().resume(SessionResumeCapabilities::new()).close(SessionCloseCapabilities::new()))
         .mcp_capabilities(McpCapabilities::new().http(true));
     InitializeResponse::new(ProtocolVersion::V1)
         .agent_capabilities(capabilities)
@@ -208,6 +224,8 @@ struct Session {
     /// Connected on first use, then kept for the session.
     clients: tokio::sync::Mutex<HashMap<String, RunningService<RoleClient, ()>>>,
     transcript: PathBuf,
+    /// The user's instructions the session started with, kept when it is resumed.
+    instructions: String,
     state: Mutex<State>,
 }
 
@@ -238,10 +256,15 @@ impl StandIn {
         servers: &[McpServer],
         meta: Option<&Meta>,
     ) -> Result<(SessionId, Vec<SessionConfigOption>), Error> {
+        let resumed = resume.is_some();
         let (id, earlier) = match resume {
             Some(id) => {
                 let path = transcript_path(&self.dir, &id.0).ok_or_else(|| Error::invalid_params().data("Not a stand-in session id."))?;
                 let earlier = read_transcript(&path).ok_or_else(|| Error::resource_not_found(Some(id.0.to_string())))?;
+                // Like Claude Code, which keeps nothing of a session before its first message.
+                if earlier.is_empty() {
+                    return Err(Error::resource_not_found(Some(id.0.to_string())));
+                }
                 (id.0.to_string(), earlier.len())
             }
             None => {
@@ -253,6 +276,16 @@ impl StandIn {
         if earlier == 0 {
             write_transcript(&transcript, &[]).map_err(|e| Error::internal_error().data(e))?;
         }
+        // Claude Code keeps the system prompt a session started with: a
+        // resumed one does not take the instructions it is resumed with.
+        let kept = transcript.with_extension("instructions");
+        let instructions = if resumed {
+            std::fs::read_to_string(&kept).unwrap_or_default()
+        } else {
+            let text = users_instructions(meta);
+            std::fs::write(&kept, &text).map_err(|e| Error::internal_error().data(e.to_string()))?;
+            text
+        };
         let (model, effort) = match self.sessions.lock().expect("sessions lock").get(&id) {
             Some(s) => {
                 let state = s.state.lock().expect("session lock");
@@ -268,6 +301,7 @@ impl StandIn {
             aliases: aliases_of(meta),
             clients: tokio::sync::Mutex::default(),
             transcript,
+            instructions,
             state: Mutex::new(State {
                 model,
                 effort,
@@ -467,6 +501,13 @@ impl Turn<'_> {
                     };
                     self.say(&said).await?;
                 }
+                Step::Instructions => {
+                    let said = match self.session.instructions.as_str() {
+                        "" => "Instructions: none.".to_string(),
+                        text => format!("Instructions: {text}"),
+                    };
+                    self.say(&said).await?;
+                }
                 Step::Fail(reason) => {
                     let reason = if reason.is_empty() { "The stand-in failed, as asked.".to_string() } else { reason };
                     return Err(Halt::Failed(reason));
@@ -637,6 +678,14 @@ fn aliases_of(meta: Option<&Meta>) -> HashMap<String, (String, String)> {
         .collect()
 }
 
+/// The user's part of the instructions Blixel appends to Claude Code's
+/// system prompt, or "" if there is none.
+fn users_instructions(meta: Option<&Meta>) -> String {
+    let append = meta.and_then(|m| m.get("systemPrompt")).and_then(|p| p.get("append")).and_then(Value::as_str).unwrap_or("");
+    let Some((_, rest)) = append.split_once("The user's instructions for you:\n") else { return String::new() };
+    rest.split("\n\n").next().unwrap_or("").trim().to_string()
+}
+
 /// A session's transcript file; None for an id that is not a plain name.
 fn transcript_path(dir: &Path, id: &str) -> Option<PathBuf> {
     let plain = !id.is_empty() && id.len() <= 100 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
@@ -691,6 +740,7 @@ enum Step {
     Cost(f64),
     Sleep(u64),
     Settings,
+    Instructions,
     Fail(String),
     Unknown(String),
 }
@@ -730,6 +780,7 @@ fn parse(text: &str) -> Vec<Step> {
             },
             "sleep" => millis(rest).map(Step::Sleep).unwrap_or_else(unknown),
             "settings" if rest.is_empty() => Step::Settings,
+            "instructions" if rest.is_empty() => Step::Instructions,
             "fail" => Step::Fail(rest.to_string()),
             _ => unknown(),
         };
